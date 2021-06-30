@@ -6,7 +6,7 @@ use nix::pty::{grantpt, posix_openpt, unlockpt};
 use nix::sys::stat::Mode;
 use nix::sys::wait::{self, waitpid, WaitStatus};
 use nix::sys::{signal, termios};
-use nix::unistd::{close, dup, dup2, fork, pipe, setsid, sysconf, write, ForkResult, Pid};
+use nix::unistd::{ForkResult, Pid, close, dup, dup2, fork, isatty, pipe, setsid, sysconf, write};
 use nix::{ioctl_write_ptr_bad, Result};
 use std::fs::File;
 use std::ops::{Deref, DerefMut};
@@ -146,8 +146,12 @@ impl PtyProcess {
             .map(|flags| flags.local_flags.contains(termios::LocalFlags::ECHO))
     }
 
-    pub fn set_echo(&self, on: bool) -> nix::Result<()> {
+    pub fn set_echo(&mut self, on: bool) -> nix::Result<()> {
         set_echo(self.master.as_raw_fd(), on)
+    }
+
+    pub fn isatty(&self) -> Result<bool> {
+        isatty(self.master.as_raw_fd())
     }
 
     pub fn set_exit_timeout(&mut self, timeout: Option<Duration>) {
