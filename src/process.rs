@@ -18,8 +18,8 @@ use termios::SpecialCharacterIndices;
 
 pub const DEFAULT_TERM_COLS: u16 = 80;
 pub const DEFAULT_TERM_ROWS: u16 = 24;
-pub const DEFAULT_VEOF_CHAR: u8 = b'4'; // ^D
-pub const DEFAULT_INTR_CHAR: u8 = b'3'; // ^C
+pub const DEFAULT_VEOF_CHAR: u8 = 0x4; // ^D
+pub const DEFAULT_INTR_CHAR: u8 = 0x3; // ^C
 
 #[derive(Debug)]
 pub(crate) struct PtyProcess {
@@ -40,9 +40,6 @@ impl PtyProcess {
         master.grant_slave_access()?;
         master.unlock_slave()?;
 
-        let slave_name = master.get_slave_name()?;
-        let slave = master.get_slave_fd()?;
-
         // handle errors in child executions by pipe
         let (exec_err_pipe_read, exec_err_pipe_write) = pipe()?;
 
@@ -50,10 +47,16 @@ impl PtyProcess {
         match fork {
             ForkResult::Child => {
                 let err = || -> nix::Result<()> {
+                    let device = master.get_slave_name()?;
+                    let slave_fd = master.get_slave_fd()?;
                     drop(master);
 
-                    make_controlling_tty(&slave_name)?;
-                    redirect_std_streams(slave)?;
+                    make_controlling_tty(&device)?;
+
+                    redirect_std_streams(slave_fd)?;
+
+                    set_echo(STDIN_FILENO, false)?;
+                    set_term_size(STDIN_FILENO, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
 
                     close(exec_err_pipe_read)?;
                     // close pipe on sucessfull exec
@@ -65,16 +68,12 @@ impl PtyProcess {
                     let max_open_fds = sysconf(nix::unistd::SysconfVar::OPEN_MAX)?.unwrap() as i32;
                     // Why closing FD 1 causes an endless loop
                     (3..max_open_fds)
-                        .filter(|&fd| fd != slave && fd != exec_err_pipe_write)
+                        .filter(|&fd| fd != slave_fd && fd != exec_err_pipe_write)
                         .for_each(|fd| {
                             let _ = close(fd);
                         });
 
-                    set_echo(STDIN_FILENO, false)?;
-                    set_term_size(STDIN_FILENO, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
-
                     let _ = command.exec();
-
                     Err(nix::Error::last())
                 }()
                 .unwrap_err();
@@ -86,7 +85,6 @@ impl PtyProcess {
                 process::exit(code);
             }
             ForkResult::Parent { child } => {
-                close(slave)?;
                 close(exec_err_pipe_write)?;
 
                 let mut pipe_buf = [0u8; 4];
@@ -123,16 +121,16 @@ impl PtyProcess {
     }
 
     pub fn get_echo(&self) -> nix::Result<bool> {
-        termios::tcgetattr(self.master.fd.as_raw_fd())
+        termios::tcgetattr(self.master.as_raw_fd())
             .map(|flags| flags.local_flags.contains(termios::LocalFlags::ECHO))
     }
 
     pub fn set_echo(&self, on: bool) -> nix::Result<()> {
-        set_echo(self.master.fd.as_raw_fd(), on)
+        set_echo(self.master.as_raw_fd(), on)
     }
 
     pub fn get_file_handle(&self) -> Result<File> {
-        let fd = dup(self.master.fd.as_raw_fd())?;
+        let fd = dup(self.master.as_raw_fd())?;
         let file = unsafe { File::from_raw_fd(fd) };
 
         Ok(file)
@@ -258,6 +256,12 @@ impl Master {
     }
 }
 
+impl AsRawFd for Master {
+    fn as_raw_fd(&self) -> RawFd {
+        self.fd.as_raw_fd()
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
 fn get_slave_name(fd: &PtyMaster) -> Result<String> {
     nix::pty::ptsname_r(fd)
@@ -345,10 +349,8 @@ fn get_term_char(fd: RawFd, char: SpecialCharacterIndices) -> Result<u8> {
 
 fn make_controlling_tty(child_name: &str) -> Result<()> {
     // Disconnect from controlling tty, if any
-    let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty());
-    if let Ok(fd) = fd {
-        close(fd)?;
-    }
+    let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty())?;
+    close(fd)?;
 
     setsid()?;
 
@@ -361,20 +363,16 @@ fn make_controlling_tty(child_name: &str) -> Result<()> {
             close(fd)?;
             return Err(nix::Error::UnsupportedOperation);
         }
-        Err(err) => return Err(nix::Error::UnsupportedOperation),
+        Err(_) => return Err(nix::Error::UnsupportedOperation),
     }
 
     // Verify we can open child pty.
-    let fd = open(child_name, OFlag::O_RDWR, Mode::empty());
-    if let Ok(fd) = fd {
-        close(fd)?;
-    }
+    let fd = open(child_name, OFlag::O_RDWR, Mode::empty())?;
+    close(fd)?;
 
     // Verify we now have a controlling tty.
-    let fd = open("/dev/tty", OFlag::O_WRONLY, Mode::empty());
-    if let Ok(fd) = fd {
-        close(fd)?;
-    }
+    let fd = open("/dev/tty", OFlag::O_WRONLY, Mode::empty())?;
+    close(fd)?;
 
     Ok(())
 }
@@ -417,22 +415,6 @@ mod tests {
     }
 
     #[test]
-    fn bash_intr() {
-        let process = PtyProcess::spawn(Command::new("bash")).unwrap();
-        let f = process.get_file_handle().unwrap();
-        let mut writer = LineWriter::new(&f);
-
-        thread::sleep(time::Duration::from_millis(300));
-        writer.write_all(&[3]).unwrap(); // send ^C
-        writer.flush().unwrap();
-
-        assert_eq!(
-            WaitStatus::Signaled(process.child_pid, signal::Signal::SIGINT, false),
-            process.wait().unwrap()
-        );
-    }
-
-    #[test]
     fn cat_eof() {
         let process = PtyProcess::spawn(Command::new("cat")).unwrap();
         let f = process.get_file_handle().unwrap();
@@ -446,7 +428,7 @@ mod tests {
         // this sleep solves an edge case of some cases when cat is somehow not "ready"
         // to take the ^C (occasional test hangs)
         thread::sleep(time::Duration::from_millis(300));
-        writer.write_all(&[4]).unwrap(); // send ^D
+        writer.write_all(&[DEFAULT_VEOF_CHAR]).unwrap(); // send ^D
         writer.flush().unwrap();
         assert_eq!(
             WaitStatus::Exited(process.child_pid, 0),
