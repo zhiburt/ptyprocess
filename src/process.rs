@@ -1,3 +1,4 @@
+use crate::control_code::ControlCode;
 use crate::stream::Stream;
 use nix::fcntl::{open, FcntlArg, FdFlag, OFlag};
 use nix::libc::{self, winsize, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
@@ -6,14 +7,15 @@ use nix::pty::{grantpt, posix_openpt, unlockpt};
 use nix::sys::stat::Mode;
 use nix::sys::wait::{self, waitpid, WaitStatus};
 use nix::sys::{signal, termios};
-use nix::unistd::{ForkResult, Pid, close, dup, dup2, fork, isatty, pipe, setsid, sysconf, write};
+use nix::unistd::{close, dup, dup2, fork, isatty, pipe, setsid, sysconf, write, ForkResult, Pid};
 use nix::{ioctl_write_ptr_bad, Result};
 use std::fs::File;
+use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::prelude::{AsRawFd, CommandExt, FromRawFd, RawFd};
 use std::process::{self, Command};
-use std::thread;
 use std::time::{self, Duration};
+use std::{io, thread};
 use termios::SpecialCharacterIndices;
 
 pub const DEFAULT_TERM_COLS: u16 = 80;
@@ -110,6 +112,26 @@ impl PtyProcess {
                 })
             }
         }
+    }
+
+    pub fn send(&mut self, s: &str) -> io::Result<()> {
+        self.stream.write_all(s.as_bytes())
+    }
+
+    pub fn send_line(&mut self, s: &str) -> io::Result<()> {
+        writeln!(self.stream, "{}", s)
+    }
+
+    pub fn send_control(&mut self, code: ControlCode) -> io::Result<()> {
+        self.stream.write_all(&[code.into()])
+    }
+
+    pub fn send_eof(&mut self) -> io::Result<()> {
+        self.stream.write_all(&[self.eof_char])
+    }
+
+    pub fn send_intr(&mut self) -> io::Result<()> {
+        self.stream.write_all(&[self.intr_char])
     }
 
     pub fn pid(&self) -> Pid {
@@ -387,6 +409,8 @@ fn get_term_char(fd: RawFd, char: SpecialCharacterIndices) -> Result<u8> {
 }
 
 fn make_controlling_tty(child_name: &str) -> Result<()> {
+    // Is this appoach's result the same as just call ioctl TIOCSCTTY?
+
     // Disconnect from controlling tty, if any
     let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty())?;
     close(fd)?;
