@@ -1,5 +1,5 @@
 [package]
-name = "expectrl"
+name = "ptyprocess"
 version = "0.1.0"
 authors = ["Maxim Zhiburt <zhiburt@gmail.com>"]
 edition = "2018"

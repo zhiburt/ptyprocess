@@ -1,3 +1,4 @@
+use crate::stream::Stream;
 use nix::fcntl::{open, FcntlArg, FdFlag, OFlag};
 use nix::libc::{self, winsize, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 use nix::pty::PtyMaster;
@@ -8,13 +9,12 @@ use nix::sys::{signal, termios};
 use nix::unistd::{close, dup, dup2, fork, pipe, setsid, sysconf, write, ForkResult, Pid};
 use nix::{ioctl_write_ptr_bad, Result};
 use std::fs::File;
+use std::ops::{Deref, DerefMut};
 use std::os::unix::prelude::{AsRawFd, CommandExt, FromRawFd, RawFd};
 use std::process::{self, Command};
 use std::thread;
 use std::time::{self, Duration};
 use termios::SpecialCharacterIndices;
-
-// create builder of PtyProcess, pwd open descriptors etc  like in ptyprocess.py
 
 pub const DEFAULT_TERM_COLS: u16 = 80;
 pub const DEFAULT_TERM_ROWS: u16 = 24;
@@ -22,9 +22,10 @@ pub const DEFAULT_VEOF_CHAR: u8 = 0x4; // ^D
 pub const DEFAULT_INTR_CHAR: u8 = 0x3; // ^C
 
 #[derive(Debug)]
-pub(crate) struct PtyProcess {
+pub struct PtyProcess {
     master: Master,
     child_pid: Pid,
+    stream: Stream,
     timeout: Option<Duration>,
     eof_char: u8,
     intr_char: u8,
@@ -94,10 +95,14 @@ impl PtyProcess {
                     return Err(nix::Error::from_errno(nix::errno::from_i32(code)));
                 }
 
-                set_term_size(master.fd.as_raw_fd(), DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
+                set_term_size(master.as_raw_fd(), DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
+
+                let file = master.get_file_handle()?;
+                let stream = Stream::new(file);
 
                 Ok(Self {
                     master,
+                    stream,
                     child_pid: child,
                     eof_char,
                     intr_char,
@@ -105,6 +110,22 @@ impl PtyProcess {
                 })
             }
         }
+    }
+
+    pub fn pid(&self) -> Pid {
+        self.child_pid
+    }
+
+    pub fn get_pty_handle(&self) -> Result<File> {
+        self.master.get_file_handle()
+    }
+
+    pub fn get_window_size(&self) -> Result<(u16, u16)> {
+        get_term_size(self.master.as_raw_fd())
+    }
+
+    pub fn set_window_size(&mut self, cols: u16, rows: u16) -> Result<()> {
+        set_term_size(self.master.as_raw_fd(), cols, rows)
     }
 
     pub fn wait_echo(&self, on: bool, timeout: Option<Duration>) -> nix::Result<bool> {
@@ -127,13 +148,6 @@ impl PtyProcess {
 
     pub fn set_echo(&self, on: bool) -> nix::Result<()> {
         set_echo(self.master.as_raw_fd(), on)
-    }
-
-    pub fn get_file_handle(&self) -> Result<File> {
-        let fd = dup(self.master.as_raw_fd())?;
-        let file = unsafe { File::from_raw_fd(fd) };
-
-        Ok(file)
     }
 
     pub fn set_exit_timeout(&mut self, timeout: Option<Duration>) {
@@ -196,6 +210,20 @@ impl Drop for PtyProcess {
     }
 }
 
+impl Deref for PtyProcess {
+    type Target = Stream;
+
+    fn deref(&self) -> &Self::Target {
+        &self.stream
+    }
+}
+
+impl DerefMut for PtyProcess {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.stream
+    }
+}
+
 fn set_term_size(fd: i32, cols: u16, rows: u16) -> nix::Result<()> {
     ioctl_write_ptr_bad!(_set_window_size, libc::TIOCSWINSZ, winsize);
 
@@ -253,6 +281,13 @@ impl Master {
         let slave_name = self.get_slave_name()?;
         let slave_fd = open(slave_name.as_str(), OFlag::O_RDWR, Mode::empty())?;
         Ok(slave_fd)
+    }
+
+    pub fn get_file_handle(&self) -> Result<File> {
+        let fd = dup(self.as_raw_fd())?;
+        let file = unsafe { File::from_raw_fd(fd) };
+
+        Ok(file)
     }
 }
 
@@ -380,116 +415,6 @@ fn make_controlling_tty(child_name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io;
-    use std::io::BufRead;
-    use std::io::BufReader;
-    use std::io::LineWriter;
-    use std::time;
-    use std::{
-        io::{Read, Write},
-        thread,
-    };
-
-    #[test]
-    fn cat_intr() {
-        let process = PtyProcess::spawn(Command::new("cat")).unwrap();
-        let f = process.get_file_handle().unwrap();
-        let mut writer = LineWriter::new(&f);
-        let mut reader = BufReader::new(&f);
-        writer.write_all(b"hello cat\n").unwrap();
-        let mut buf = String::new();
-        reader.read_line(&mut buf).unwrap();
-        assert_eq!(buf, "hello cat\r\n");
-
-        // this sleep solves an edge case of some cases when cat is somehow not "ready"
-        // to take the ^C (occasional test hangs)
-        // Ctrl-C is etx(End of text). Thus send \x03.
-        thread::sleep(time::Duration::from_millis(300));
-        writer.write_all(&[DEFAULT_INTR_CHAR]).unwrap(); // send ^C
-        writer.flush().unwrap();
-
-        assert_eq!(
-            WaitStatus::Signaled(process.child_pid, signal::Signal::SIGINT, false),
-            process.wait().unwrap()
-        );
-    }
-
-    #[test]
-    fn cat_eof() {
-        let process = PtyProcess::spawn(Command::new("cat")).unwrap();
-        let f = process.get_file_handle().unwrap();
-        let mut writer = LineWriter::new(&f);
-        let mut reader = BufReader::new(&f);
-        writer.write_all(b"hello cat\n").unwrap();
-        let mut buf = String::new();
-        reader.read_line(&mut buf).unwrap();
-        assert_eq!(buf, "hello cat\r\n");
-
-        // this sleep solves an edge case of some cases when cat is somehow not "ready"
-        // to take the ^C (occasional test hangs)
-        thread::sleep(time::Duration::from_millis(300));
-        writer.write_all(&[DEFAULT_VEOF_CHAR]).unwrap(); // send ^D
-        writer.flush().unwrap();
-        assert_eq!(
-            WaitStatus::Exited(process.child_pid, 0),
-            process.wait().unwrap()
-        );
-    }
-
-    #[test]
-    fn read_after_eof() -> Result<()> {
-        let msg = "hello cat";
-        let mut command = Command::new("echo");
-        command.arg(msg);
-        let proc = PtyProcess::spawn(command).unwrap();
-        let file = proc.get_file_handle()?;
-
-        assert_eq!(read_exact(&file, msg.len()).unwrap(), msg);
-
-        let err = read_exact(&file, 1).unwrap_err();
-        assert_eq!(err.to_string(), "Input/output error (os error 5)");
-
-        assert_eq!(WaitStatus::Exited(proc.child_pid, 0), proc.wait()?);
-
-        Ok(())
-    }
-
-    #[test]
-    fn pty_cat_multiline() -> Result<()> {
-        let command = Command::new("cat");
-        let mut proc = PtyProcess::spawn(command)?;
-        let file = proc.get_file_handle()?;
-
-        write(&file, "hello cat\n");
-
-        thread::sleep(time::Duration::from_millis(600));
-        proc.exit()?;
-
-        let (output, _) = read_all(file);
-        assert_eq!(output, "hello cat\r\n");
-
-        Ok(())
-    }
-
-    #[test]
-    fn ptyprocess_check_terminal_line_settings() -> Result<()> {
-        let mut command = Command::new("stty");
-        command.arg("-a");
-        let proc = PtyProcess::spawn(command)?;
-        let file = proc.get_file_handle()?;
-
-        let (output, err) = read_all(file);
-
-        println!("{}", output);
-
-        assert!(output.split_whitespace().any(|word| word == "-echo"));
-        assert_eq!(
-            err.unwrap().to_string(),
-            "Input/output error (os error 5)".to_string()
-        );
-
-        Ok(())
-    }
 
     #[test]
     fn create_pty() -> Result<()> {
@@ -515,36 +440,5 @@ mod tests {
         assert!(master.fd.as_raw_fd() == old_master_fd);
 
         Ok(())
-    }
-
-    fn write<W: Write + Read, S: AsRef<str>>(mut writer: W, msg: S) -> usize {
-        let msg = msg.as_ref();
-        write!(writer, "{}", msg).unwrap();
-        writer.flush().unwrap();
-
-        msg.len()
-    }
-
-    fn read_exact<R: Read>(reader: R, length: usize) -> io::Result<String> {
-        let mut buf = vec![0u8; length];
-        BufReader::new(reader).read_exact(&mut buf)?;
-
-        Ok(String::from_utf8(buf).unwrap())
-    }
-
-    // read's input by byte so it returns a erorr only on last byte.
-    fn read_all<R: Read>(reader: R) -> (String, Option<io::Error>) {
-        let mut reader = BufReader::new(reader);
-        let mut string = Vec::new();
-        let buf = &mut [0u8; 1];
-        loop {
-            match reader.read(&mut buf[..]) {
-                Ok(0) => return (String::from_utf8_lossy(&string).to_string(), None),
-                Ok(_) => {
-                    string.push(buf[0]);
-                }
-                Err(e) => return (String::from_utf8_lossy(&string).to_string(), Some(e)),
-            }
-        }
     }
 }
