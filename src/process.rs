@@ -1,14 +1,18 @@
 use crate::control_code::ControlCode;
 use crate::stream::Stream;
-use nix::fcntl::{open, FcntlArg, FdFlag, OFlag};
+use nix::errno::{self, Errno};
+use nix::fcntl::{fcntl, open, FcntlArg, FdFlag, OFlag};
 use nix::libc::{self, winsize, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 use nix::pty::PtyMaster;
 use nix::pty::{grantpt, posix_openpt, unlockpt};
 use nix::sys::stat::Mode;
 use nix::sys::wait::{self, waitpid, WaitStatus};
 use nix::sys::{signal, termios};
-use nix::unistd::{close, dup, dup2, fork, isatty, pipe, setsid, sysconf, write, ForkResult, Pid};
-use nix::{ioctl_write_ptr_bad, Result};
+use nix::unistd::{
+    self, close, dup, dup2, fork, isatty, pipe, setsid, sysconf, write, ForkResult, Pid, SysconfVar,
+};
+use nix::{ioctl_write_ptr_bad, Error, Result};
+use signal::Signal::SIGKILL;
 use std::fs::File;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
@@ -17,6 +21,8 @@ use std::process::{self, Command};
 use std::time::{self, Duration};
 use std::{io, thread};
 use termios::SpecialCharacterIndices;
+
+// TODO: decide the right behaiviour of exit terminate etc...
 
 pub const DEFAULT_TERM_COLS: u16 = 80;
 pub const DEFAULT_TERM_ROWS: u16 = 24;
@@ -28,9 +34,9 @@ pub struct PtyProcess {
     master: Master,
     child_pid: Pid,
     stream: Stream,
-    timeout: Option<Duration>,
     eof_char: u8,
     intr_char: u8,
+    terminate_approach_delay: Duration,
 }
 
 impl PtyProcess {
@@ -49,7 +55,7 @@ impl PtyProcess {
         let fork = unsafe { fork()? };
         match fork {
             ForkResult::Child => {
-                let err = || -> nix::Result<()> {
+                let err = || -> Result<()> {
                     let device = master.get_slave_name()?;
                     let slave_fd = master.get_slave_fd()?;
                     drop(master);
@@ -63,12 +69,12 @@ impl PtyProcess {
 
                     close(exec_err_pipe_read)?;
                     // close pipe on sucessfull exec
-                    nix::fcntl::fcntl(exec_err_pipe_write, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
+                    fcntl(exec_err_pipe_write, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
 
                     //  Do not allow child to inherit open file descriptors from parent
                     //
                     // on linux could be used getrlimit(RLIMIT_NOFILE, rlim) interface
-                    let max_open_fds = sysconf(nix::unistd::SysconfVar::OPEN_MAX)?.unwrap() as i32;
+                    let max_open_fds = sysconf(SysconfVar::OPEN_MAX)?.unwrap() as i32;
                     // Why closing FD 1 causes an endless loop
                     (3..max_open_fds)
                         .filter(|&fd| fd != slave_fd && fd != exec_err_pipe_write)
@@ -77,7 +83,7 @@ impl PtyProcess {
                         });
 
                     let _ = command.exec();
-                    Err(nix::Error::last())
+                    Err(Error::last())
                 }()
                 .unwrap_err();
 
@@ -91,10 +97,10 @@ impl PtyProcess {
                 close(exec_err_pipe_write)?;
 
                 let mut pipe_buf = [0u8; 4];
-                nix::unistd::read(exec_err_pipe_read, &mut pipe_buf)?;
+                unistd::read(exec_err_pipe_read, &mut pipe_buf)?;
                 let code = i32::from_be_bytes(pipe_buf);
                 if code != 0 {
-                    return Err(nix::Error::from_errno(nix::errno::from_i32(code)));
+                    return Err(Error::from_errno(errno::from_i32(code)));
                 }
 
                 set_term_size(master.as_raw_fd(), DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
@@ -108,7 +114,7 @@ impl PtyProcess {
                     child_pid: child,
                     eof_char,
                     intr_char,
-                    timeout: Some(Duration::from_millis(30000)),
+                    terminate_approach_delay: Duration::from_millis(100),
                 })
             }
         }
@@ -150,7 +156,7 @@ impl PtyProcess {
         set_term_size(self.master.as_raw_fd(), cols, rows)
     }
 
-    pub fn wait_echo(&self, on: bool, timeout: Option<Duration>) -> nix::Result<bool> {
+    pub fn wait_echo(&self, on: bool, timeout: Option<Duration>) -> Result<bool> {
         let now = time::Instant::now();
         while timeout.is_none() || now.elapsed() < timeout.unwrap() {
             if on == self.get_echo()? {
@@ -163,12 +169,12 @@ impl PtyProcess {
         Ok(false)
     }
 
-    pub fn get_echo(&self) -> nix::Result<bool> {
+    pub fn get_echo(&self) -> Result<bool> {
         termios::tcgetattr(self.master.as_raw_fd())
             .map(|flags| flags.local_flags.contains(termios::LocalFlags::ECHO))
     }
 
-    pub fn set_echo(&mut self, on: bool) -> nix::Result<()> {
+    pub fn set_echo(&mut self, on: bool) -> Result<()> {
         set_echo(self.master.as_raw_fd(), on)
     }
 
@@ -176,8 +182,9 @@ impl PtyProcess {
         isatty(self.master.as_raw_fd())
     }
 
-    pub fn set_exit_timeout(&mut self, timeout: Option<Duration>) {
-        self.timeout = timeout;
+    /// Set the pty process's terminate approach delay.
+    pub fn set_terminate_approach_delay(&mut self, terminate_approach_delay: Duration) {
+        self.terminate_approach_delay = terminate_approach_delay;
     }
 
     pub fn status(&self) -> Result<WaitStatus> {
@@ -188,50 +195,63 @@ impl PtyProcess {
         signal::kill(self.child_pid, signal)
     }
 
+    pub fn signal(&mut self, signal: signal::Signal) -> Result<()> {
+        signal::kill(self.child_pid, signal)
+    }
+
     pub fn wait(&self) -> Result<WaitStatus> {
         waitpid(self.child_pid, None)
     }
 
-    pub fn exit(&mut self) -> Result<WaitStatus> {
-        if let Err(nix::Error::Sys(nix::errno::Errno::ESRCH)) = self.terminate(signal::SIGTERM) {
-            return Ok(WaitStatus::Exited(self.child_pid, 0));
-        }
-
+    pub fn is_alive(&self) -> Result<bool> {
         match self.status() {
-            Err(nix::Error::Sys(nix::errno::Errno::ECHILD)) => {
-                Ok(WaitStatus::Exited(self.child_pid, 0))
-            }
-            result => result,
+            Ok(status) if status == WaitStatus::StillAlive => Ok(true),
+            Ok(_) | Err(Error::Sys(Errno::ECHILD)) | Err(Error::Sys(Errno::ESRCH)) => Ok(false),
+            Err(err) => Err(err),
         }
     }
 
-    fn terminate(&mut self, signal: signal::Signal) -> Result<()> {
-        let start = time::Instant::now();
-        loop {
-            self.kill(signal)?;
+    // This forces a child process to terminate. It starts nicely with
+    // SIGHUP, SIGCONT, SIGINT, SIGTERM.
+    // If "force" is True then moves onto SIGKILL.
+    //
+    // This returns true if the child was terminated. and returns false if the
+    // child could not be terminated.
+    pub fn exit(&mut self, force: bool) -> Result<bool> {
+        if !self.is_alive()? {
+            return Ok(true);
+        }
 
-            let status = self.status()?;
-            if status != wait::WaitStatus::StillAlive {
-                return Ok(());
-            }
-
-            thread::sleep(time::Duration::from_millis(100));
-
-            // kill -9 if timout is reached
-            if let Some(timeout) = self.timeout {
-                if start.elapsed() > timeout {
-                    self.kill(signal::Signal::SIGKILL)?;
-                    return Ok(());
-                }
+        for &signal in &[
+            signal::SIGHUP,
+            signal::SIGCONT,
+            signal::SIGINT,
+            signal::SIGTERM,
+        ] {
+            if self.try_to_terminate(signal)? {
+                return Ok(true);
             }
         }
+
+        if !force {
+            return Ok(false);
+        }
+
+        self.try_to_terminate(SIGKILL)
+    }
+
+    pub fn try_to_terminate(&mut self, signal: signal::Signal) -> Result<bool> {
+        self.kill(signal)?;
+        thread::sleep(self.terminate_approach_delay);
+
+        self.is_alive().map(|is_alive| !is_alive)
     }
 }
 
 impl Drop for PtyProcess {
     fn drop(&mut self) {
         if let Ok(WaitStatus::StillAlive) = self.status() {
-            self.exit().unwrap();
+            self.exit(true).unwrap();
         }
     }
 }
@@ -250,7 +270,7 @@ impl DerefMut for PtyProcess {
     }
 }
 
-fn set_term_size(fd: i32, cols: u16, rows: u16) -> nix::Result<()> {
+fn set_term_size(fd: i32, cols: u16, rows: u16) -> Result<()> {
     ioctl_write_ptr_bad!(_set_window_size, libc::TIOCSWINSZ, winsize);
 
     let size = winsize {
@@ -265,7 +285,7 @@ fn set_term_size(fd: i32, cols: u16, rows: u16) -> nix::Result<()> {
     Ok(())
 }
 
-fn get_term_size(fd: i32) -> nix::Result<(u16, u16)> {
+fn get_term_size(fd: i32) -> Result<(u16, u16)> {
     nix::ioctl_read_bad!(_get_window_size, libc::TIOCGWINSZ, winsize);
 
     let mut size = winsize {
@@ -351,7 +371,7 @@ fn get_slave_name(fd: &PtyMaster) -> Result<String> {
             let string = CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned();
             return Ok(string);
         }
-        _ => Err(nix::Error::last()),
+        _ => Err(Error::last()),
     }
 }
 
@@ -421,12 +441,12 @@ fn make_controlling_tty(child_name: &str) -> Result<()> {
     // it again.  We expect that OSError of ENXIO should always be raised.
     let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty());
     match fd {
-        Err(nix::Error::Sys(nix::errno::Errno::ENXIO)) => {} // ok
+        Err(Error::Sys(Errno::ENXIO)) => {} // ok
         Ok(fd) => {
             close(fd)?;
-            return Err(nix::Error::UnsupportedOperation);
+            return Err(Error::UnsupportedOperation);
         }
-        Err(_) => return Err(nix::Error::UnsupportedOperation),
+        Err(_) => return Err(Error::UnsupportedOperation),
     }
 
     // Verify we can open child pty.

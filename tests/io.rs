@@ -21,9 +21,7 @@ fn cat() {
     drop(writer);
     drop(reader);
 
-    let status = process.exit().unwrap();
-
-    assert_eq!(WaitStatus::Exited(process.pid(), 0), status);
+    assert_eq!(process.exit(true).unwrap(), true);
 }
 
 #[test]
