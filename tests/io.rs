@@ -1,4 +1,4 @@
-use ptyprocess::{PtyProcess, Signal, WaitStatus};
+use ptyprocess::{ControlCode, PtyProcess, Signal, WaitStatus};
 use std::{
     io::{BufRead, BufReader, LineWriter, Read, Write},
     process::Command,
@@ -90,4 +90,16 @@ fn ptyprocess_check_terminal_line_settings() {
     println!("{}", buf);
 
     assert!(buf.split_whitespace().any(|word| word == "-echo"));
+}
+
+#[test]
+fn send_controll() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    process.send_control(ControlCode::EOT).unwrap();
+
+    assert_eq!(
+        WaitStatus::Exited(process.pid(), 0),
+        process.wait().unwrap()
+    );
 }
