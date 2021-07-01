@@ -14,6 +14,7 @@ use nix::unistd::{
 use nix::{ioctl_write_ptr_bad, Error, Result};
 use signal::Signal::SIGKILL;
 use std::fs::File;
+use std::io::IoSlice;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::prelude::{AsRawFd, CommandExt, FromRawFd, RawFd};
 use std::process::{self, Command};
@@ -230,12 +231,25 @@ use std::io::Write;
 
 #[cfg(feature = "sync")]
 impl PtyProcess {
-    pub fn send(&mut self, s: &str) -> io::Result<()> {
-        self.stream.write_all(s.as_bytes())
+    pub fn send<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
+        self.stream.write_all(s.as_ref().as_bytes())
     }
 
-    pub fn send_line(&mut self, s: &str) -> io::Result<()> {
-        writeln!(self.stream, "{}", s)
+    pub fn send_line<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
+        #[cfg(windows)]
+        const LINE_ENDING: &[u8] = b"\r\n";
+        #[cfg(not(windows))]
+        const LINE_ENDING: &[u8] = b"\n";
+
+        let bufs = &mut [
+            IoSlice::new(s.as_ref().as_bytes()),
+            IoSlice::new(LINE_ENDING),
+        ];
+
+        let _ = self.write_vectored(bufs)?;
+        self.flush()?;
+
+        Ok(())
     }
 
     pub fn send_control(&mut self, code: ControlCode) -> io::Result<()> {
@@ -256,13 +270,24 @@ use futures_lite::AsyncWriteExt;
 
 #[cfg(feature = "async")]
 impl PtyProcess {
-    pub async fn send(&mut self, s: &str) -> io::Result<()> {
-        self.stream.write_all(s.as_bytes()).await
+    pub async fn send<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
+        self.stream.write_all(s.as_ref().as_bytes()).await
     }
 
-    pub async fn send_line(&mut self, s: &str) -> io::Result<()> {
-        self.stream.write_all(s.as_bytes()).await?;
-        self.stream.write_all(&[b'\n']).await?;
+    pub async fn send_line<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
+        #[cfg(windows)]
+        const LINE_ENDING: &[u8] = b"\r\n";
+        #[cfg(not(windows))]
+        const LINE_ENDING: &[u8] = b"\n";
+
+        let bufs = &mut [
+            IoSlice::new(s.as_ref().as_bytes()),
+            IoSlice::new(LINE_ENDING),
+        ];
+
+        let _ = self.write_vectored(bufs).await?;
+        self.flush().await?;
+
         Ok(())
     }
 
