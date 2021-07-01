@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: [ubuntu-latest, macos-latest]
-        feauture: [--default-features, --no-default-features --features async]
+        feauture: [--features default, --no-default-features --features async]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v2
