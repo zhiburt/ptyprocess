@@ -14,15 +14,12 @@ use nix::unistd::{
 use nix::{ioctl_write_ptr_bad, Error, Result};
 use signal::Signal::SIGKILL;
 use std::fs::File;
-use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::prelude::{AsRawFd, CommandExt, FromRawFd, RawFd};
 use std::process::{self, Command};
 use std::time::{self, Duration};
 use std::{io, thread};
 use termios::SpecialCharacterIndices;
-
-// TODO: decide the right behaiviour of exit terminate etc...
 
 pub const DEFAULT_TERM_COLS: u16 = 80;
 pub const DEFAULT_TERM_ROWS: u16 = 24;
@@ -118,26 +115,6 @@ impl PtyProcess {
                 })
             }
         }
-    }
-
-    pub fn send(&mut self, s: &str) -> io::Result<()> {
-        self.stream.write_all(s.as_bytes())
-    }
-
-    pub fn send_line(&mut self, s: &str) -> io::Result<()> {
-        writeln!(self.stream, "{}", s)
-    }
-
-    pub fn send_control(&mut self, code: ControlCode) -> io::Result<()> {
-        self.stream.write_all(&[code.into()])
-    }
-
-    pub fn send_eof(&mut self) -> io::Result<()> {
-        self.stream.write_all(&[self.eof_char])
-    }
-
-    pub fn send_intr(&mut self) -> io::Result<()> {
-        self.stream.write_all(&[self.intr_char])
     }
 
     pub fn pid(&self) -> Pid {
@@ -245,6 +222,60 @@ impl PtyProcess {
         thread::sleep(self.terminate_approach_delay);
 
         self.is_alive().map(|is_alive| !is_alive)
+    }
+}
+
+#[cfg(feature = "sync")]
+use std::io::Write;
+
+#[cfg(feature = "sync")]
+impl PtyProcess {
+    pub fn send(&mut self, s: &str) -> io::Result<()> {
+        self.stream.write_all(s.as_bytes())
+    }
+
+    pub fn send_line(&mut self, s: &str) -> io::Result<()> {
+        writeln!(self.stream, "{}", s)
+    }
+
+    pub fn send_control(&mut self, code: ControlCode) -> io::Result<()> {
+        self.stream.write_all(&[code.into()])
+    }
+
+    pub fn send_eof(&mut self) -> io::Result<()> {
+        self.stream.write_all(&[self.eof_char])
+    }
+
+    pub fn send_intr(&mut self) -> io::Result<()> {
+        self.stream.write_all(&[self.intr_char])
+    }
+}
+
+#[cfg(feature = "async")]
+use futures_lite::AsyncWriteExt;
+
+#[cfg(feature = "async")]
+impl PtyProcess {
+    pub async fn send(&mut self, s: &str) -> io::Result<()> {
+        self.stream.write_all(s.as_bytes()).await
+    }
+
+    pub async fn send_line(&mut self, s: &str) -> io::Result<()> {
+        self.stream.write_all(s.as_bytes()).await?;
+        self.stream.write_all(&[b'\n']).await?;
+        Ok(())
+    }
+
+    pub async fn send_control(&mut self, code: ControlCode) -> io::Result<()> {
+        self.stream.write_all(&[code.into()]).await
+    }
+
+    pub async fn send_eof(&mut self) -> io::Result<()> {
+        self.stream.write_all(&[self.eof_char]).await
+    }
+
+    pub async fn send_intr(&mut self) -> io::Result<()> {
+        self.stream.write_all(&[self.intr_char]).await
     }
 }
 

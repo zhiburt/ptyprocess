@@ -1,3 +1,5 @@
+#![cfg(feature = "sync")]
+
 use ptyprocess::{ControlCode, PtyProcess, Signal, WaitStatus};
 use std::{
     io::{BufRead, BufReader, LineWriter, Read, Write},
