@@ -1,4 +1,4 @@
-name: Build
+name: Code Coverage
 
 on: [push, pull_request]
 
@@ -6,46 +6,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: Check
-    strategy:
-      fail-fast: false
-      matrix:
-        rust: [nightly, stable]
-        platform: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.platform }}
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: ${{ matrix.rust || 'stable' }}
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
-
-  test:
-    name: Test Suite
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-
-  test_async:
-    name: Test Suite Async Feature
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --no-default-features --features async
-
-  fmt:
-    name: Rustfmt
+  coverage:
+    name: CodeCov
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -54,39 +16,12 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
-      - run: rustup component add rustfmt
-      - uses: actions-rs/cargo@v1
+      - name: Run cargo-tarpaulin
+        uses: actions-rs/tarpaulin@v0.1
         with:
-          command: fmt
-          args: --all -- --check
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+          version: "0.15.0"
+          args: ""
+      - name: Upload to codecov.io
+        uses: codecov/codecov-action@v1.0.2
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: rustup component add clippy
-      - uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -D warnings
-
-  audit:
-    name: Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - run: cargo install cargo-audit
-      - uses: actions-rs/cargo@v1
-        with:
-          command: audit
+          token: ${{secrets.CODECOV_TOKEN}}

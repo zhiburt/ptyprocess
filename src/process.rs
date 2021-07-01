@@ -58,7 +58,6 @@ impl PtyProcess {
                     let slave_fd = master.get_slave_fd()?;
                     drop(master);
 
-
                     make_controlling_tty(&device)?;
                     redirect_std_streams(slave_fd)?;
 
