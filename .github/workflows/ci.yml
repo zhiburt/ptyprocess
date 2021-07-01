@@ -27,22 +27,18 @@ jobs:
 
   test:
     name: Test Suite
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-latest, macos-latest]
+        feauture: [--default-features, --no-default-features --features async]
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/cargo@v1
         with:
           command: test
-
-  test_async:
-    name: Test Suite Async Feature
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose --no-default-features --features async
+          args: --verbose ${{ matrix.feauture }} 
 
   fmt:
     name: Rustfmt
