@@ -75,7 +75,7 @@ fn read_after_eof() {
     assert_eq!(0, proc.read(&mut buf).unwrap());
     assert_eq!(0, proc.read(&mut buf).unwrap());
 
-    assert_eq!(WaitStatus::Exited(proc.pid(), 0), proc.status().unwrap());
+    assert_eq!(WaitStatus::Exited(proc.pid(), 0), proc.wait().unwrap());
 }
 
 #[test]
