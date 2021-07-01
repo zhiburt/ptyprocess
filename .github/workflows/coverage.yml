@@ -33,7 +33,6 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose
 
   test_async:
     name: Test Suite Async Feature
@@ -76,3 +75,18 @@ jobs:
         with:
           command: clippy
           args: -- -D warnings
+
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: cargo install cargo-audit
+      - uses: actions-rs/cargo@v1
+        with:
+          command: audit

@@ -58,8 +58,8 @@ impl PtyProcess {
                     let slave_fd = master.get_slave_fd()?;
                     drop(master);
 
-                    make_controlling_tty(&device)?;
 
+                    make_controlling_tty(&device)?;
                     redirect_std_streams(slave_fd)?;
 
                     set_echo(STDIN_FILENO, false)?;
@@ -424,7 +424,9 @@ fn get_slave_name(fd: &PtyMaster) -> Result<String> {
 
     match unsafe { ioctl(fd, TIOCPTYGNAME as u64, &mut buf) } {
         0 => {
-            let string = CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned();
+            let string = unsafe { CStr::from_ptr(buf.as_ptr()) }
+                .to_string_lossy()
+                .into_owned();
             return Ok(string);
         }
         _ => Err(Error::last()),
@@ -488,8 +490,18 @@ fn make_controlling_tty(child_name: &str) -> Result<()> {
     // Is this appoach's result the same as just call ioctl TIOCSCTTY?
 
     // Disconnect from controlling tty, if any
-    let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty())?;
-    close(fd)?;
+    let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty());
+    match fd {
+        Ok(fd) => {
+            close(fd)?;
+        }
+        Err(Error::Sys(Errno::ENXIO)) => {
+            // Sometimes we get ENXIO right here which 'probably' means
+            // that we has been already disconnected from controlling tty.
+            // Specifically it was discovered on ubuntu-latest Github CI platform.
+        }
+        Err(err) => return Err(err),
+    }
 
     setsid()?;
 
