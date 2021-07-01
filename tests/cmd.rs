@@ -1,15 +1,12 @@
 use ptyprocess::PtyProcess;
-use std::process::Command;
+use std::{io, process::Command};
 
 #[test]
 fn empty() {
     let err = PtyProcess::spawn(Command::new("")).unwrap_err();
-
-    match err.to_string().as_ref() {
-        // ubuntu
-        "ENXIO: No such device or address" | 
-        // fedora
-        "ENOENT: No such file or directory" => {},
-        err => panic!("Unexpected error message: {}", err), 
-    }
+    let os_err = err.as_errno().unwrap() as i32;
+    assert_eq!(
+        io::ErrorKind::NotFound,
+        io::Error::from_raw_os_error(os_err).kind()
+    );
 }
