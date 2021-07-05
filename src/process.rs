@@ -22,11 +22,25 @@ use std::time::{self, Duration};
 use std::{io, thread};
 use termios::SpecialCharacterIndices;
 
-pub const DEFAULT_TERM_COLS: u16 = 80;
-pub const DEFAULT_TERM_ROWS: u16 = 24;
-pub const DEFAULT_VEOF_CHAR: u8 = 0x4; // ^D
-pub const DEFAULT_INTR_CHAR: u8 = 0x3; // ^C
+const DEFAULT_TERM_COLS: u16 = 80;
+const DEFAULT_TERM_ROWS: u16 = 24;
+const DEFAULT_VEOF_CHAR: u8 = 0x4; // ^D
+const DEFAULT_INTR_CHAR: u8 = 0x3; // ^C
 
+/// PtyProcess represents a controller for a spawned process.
+///
+/// The structure implements `std::io::Read` and `std::io::Write` which communicates with
+/// a child.
+///
+/// ```no_run
+/// use ptyprocess::PtyProcess;
+/// use std::io::Write;
+/// use std::process::Command;
+///
+/// let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+/// process.write_all(b"Hello World").unwrap();
+/// process.flush().unwrap();
+/// ```
 #[derive(Debug)]
 pub struct PtyProcess {
     master: Master,
@@ -38,7 +52,14 @@ pub struct PtyProcess {
 }
 
 impl PtyProcess {
-    // make this result io::Result
+    /// Spawns a child process and
+    /// creates a `PtyProcess` structure which controll communication with a child
+    ///
+    /// ```no_run
+    ///   # use std::process::Command;
+    ///   # use ptyprocess::PtyProcess;
+    ///     let proc = PtyProcess::spawn(Command::new("bash"));
+    /// ```
     pub fn spawn(mut command: Command) -> Result<Self> {
         let eof_char = get_eof_char();
         let intr_char = get_intr_char();
@@ -68,7 +89,7 @@ impl PtyProcess {
                     // close pipe on sucessfull exec
                     fcntl(exec_err_pipe_write, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
 
-                    //  Do not allow child to inherit open file descriptors from parent
+                    // Do not allow child to inherit open file descriptors from parent
                     //
                     // on linux could be used getrlimit(RLIMIT_NOFILE, rlim) interface
                     let max_open_fds = sysconf(SysconfVar::OPEN_MAX)?.unwrap() as i32;
@@ -100,6 +121,8 @@ impl PtyProcess {
                     return Err(Error::from_errno(errno::from_i32(code)));
                 }
 
+                // Some systems may work in this way? (not sure)
+                // that we need to set a terminal size in a parent.
                 set_term_size(master.as_raw_fd(), DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
 
                 let file = master.get_file_handle()?;
@@ -117,22 +140,39 @@ impl PtyProcess {
         }
     }
 
+    /// Returns a pid of a child process
     pub fn pid(&self) -> Pid {
         self.child_pid
     }
 
+    /// Returns a file representation of a PTY, which can be used to communicate with it.
+    ///
+    /// ```no_run
+    /// use ptyprocess::PtyProcess;
+    /// use std::{process::Command, io::{BufReader, LineWriter}};
+    ///
+    /// let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+    /// let pty = process.get_pty_handle().unwrap();
+    /// let mut writer = LineWriter::new(&pty);
+    /// let mut reader = BufReader::new(&pty);
+    /// ```
     pub fn get_pty_handle(&self) -> Result<File> {
         self.master.get_file_handle()
     }
 
+    /// Get window size of a terminal.
+    ///
+    /// Default is size is 80x24.
     pub fn get_window_size(&self) -> Result<(u16, u16)> {
         get_term_size(self.master.as_raw_fd())
     }
 
+    /// Sets a terminal size
     pub fn set_window_size(&mut self, cols: u16, rows: u16) -> Result<()> {
         set_term_size(self.master.as_raw_fd(), cols, rows)
     }
 
+    /// Waits until a echo settings were setup
     pub fn wait_echo(&self, on: bool, timeout: Option<Duration>) -> Result<bool> {
         let now = time::Instant::now();
         while timeout.is_none() || now.elapsed() < timeout.unwrap() {
@@ -146,11 +186,13 @@ impl PtyProcess {
         Ok(false)
     }
 
+    /// Get_echo returns true if an echo setting is setup.
     pub fn get_echo(&self) -> Result<bool> {
         termios::tcgetattr(self.master.as_raw_fd())
             .map(|flags| flags.local_flags.contains(termios::LocalFlags::ECHO))
     }
 
+    /// Sets a echo setting for a terminal
     pub fn set_echo(&mut self, on: bool) -> Result<()> {
         set_echo(self.master.as_raw_fd(), on)
     }
@@ -164,22 +206,38 @@ impl PtyProcess {
         self.terminate_approach_delay = terminate_approach_delay;
     }
 
+    /// Status returns a status a of child process.
     pub fn status(&self) -> Result<WaitStatus> {
         waitpid(self.child_pid, Some(wait::WaitPidFlag::WNOHANG))
     }
 
+    /// Kill sends a signal to a child process.
+    ///
+    /// The operation is non-blocking.
     pub fn kill(&mut self, signal: signal::Signal) -> Result<()> {
         signal::kill(self.child_pid, signal)
     }
 
+    /// Signal is an alias to kill.
     pub fn signal(&mut self, signal: signal::Signal) -> Result<()> {
-        signal::kill(self.child_pid, signal)
+        self.kill(signal)
     }
 
+    /// Wait blocks until a child process exits.
+    ///
+    /// It returns a error if the child was DEAD or not exist
+    /// at the time of a call.
+    /// So sometimes it's better to use a [`is_alive`] method
+    ///
+    /// [`is_alive`]: struct.PtyProcess.html#method.is_alive
     pub fn wait(&self) -> Result<WaitStatus> {
         waitpid(self.child_pid, None)
     }
 
+    /// Checks if a process is still exists.
+    ///
+    /// It's a non blocking operation.
+    /// It's takes in mind errors which indicates that the child is gone.
     pub fn is_alive(&self) -> Result<bool> {
         match self.status() {
             Ok(status) if status == WaitStatus::StillAlive => Ok(true),
@@ -188,12 +246,14 @@ impl PtyProcess {
         }
     }
 
-    // This forces a child process to terminate. It starts nicely with
-    // SIGHUP, SIGCONT, SIGINT, SIGTERM.
-    // If "force" is True then moves onto SIGKILL.
-    //
-    // This returns true if the child was terminated. and returns false if the
-    // child could not be terminated.
+    /// Try to force a child to terminate.
+    ///
+    /// It starts nicely with
+    /// SIGHUP, SIGCONT, SIGINT, SIGTERM.
+    /// If "force" is True then moves onto SIGKILL.
+    ///
+    /// This returns true if the child was terminated. and returns false if the
+    /// child could not be terminated.
     pub fn exit(&mut self, force: bool) -> Result<bool> {
         if !self.is_alive()? {
             return Ok(true);
@@ -217,7 +277,7 @@ impl PtyProcess {
         self.try_to_terminate(SIGKILL)
     }
 
-    pub fn try_to_terminate(&mut self, signal: signal::Signal) -> Result<bool> {
+    fn try_to_terminate(&mut self, signal: signal::Signal) -> Result<bool> {
         self.kill(signal)?;
         thread::sleep(self.terminate_approach_delay);
 
@@ -230,10 +290,12 @@ use std::io::Write;
 
 #[cfg(feature = "sync")]
 impl PtyProcess {
+    /// Send writes a string to a STDIN of a child.
     pub fn send<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
         self.stream.write_all(s.as_ref().as_bytes())
     }
 
+    /// Send writes a line to a STDIN of a child.
     pub fn send_line<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
         #[cfg(windows)]
         const LINE_ENDING: &[u8] = b"\r\n";
@@ -251,14 +313,17 @@ impl PtyProcess {
         Ok(())
     }
 
+    /// Send controll character to a child process.
     pub fn send_control(&mut self, code: ControlCode) -> io::Result<()> {
         self.stream.write_all(&[code.into()])
     }
 
+    /// Send EOF indicator to a child process.
     pub fn send_eof(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.eof_char])
     }
 
+    /// Send INTR indicator to a child process.
     pub fn send_intr(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.intr_char])
     }
@@ -269,10 +334,12 @@ use futures_lite::AsyncWriteExt;
 
 #[cfg(feature = "async")]
 impl PtyProcess {
+    /// Send writes a string to a STDIN of a child.
     pub async fn send<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
         self.stream.write_all(s.as_ref().as_bytes()).await
     }
 
+    /// Send writes a line to a STDIN of a child.
     pub async fn send_line<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
         #[cfg(windows)]
         const LINE_ENDING: &[u8] = b"\r\n";
@@ -290,14 +357,17 @@ impl PtyProcess {
         Ok(())
     }
 
+    /// Send controll character to a child process.
     pub async fn send_control(&mut self, code: ControlCode) -> io::Result<()> {
         self.stream.write_all(&[code.into()]).await
     }
 
+    /// Send EOF indicator to a child process.
     pub async fn send_eof(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.eof_char]).await
     }
 
+    /// Send INTR indicator to a child process.
     pub async fn send_intr(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.intr_char]).await
     }
@@ -356,35 +426,35 @@ fn get_term_size(fd: i32) -> Result<(u16, u16)> {
 }
 
 #[derive(Debug)]
-pub(crate) struct Master {
+struct Master {
     fd: PtyMaster,
 }
 
 impl Master {
-    pub fn open() -> Result<Self> {
+    fn open() -> Result<Self> {
         let master_fd = posix_openpt(OFlag::O_RDWR)?;
         Ok(Self { fd: master_fd })
     }
 
-    pub fn grant_slave_access(&self) -> Result<()> {
+    fn grant_slave_access(&self) -> Result<()> {
         grantpt(&self.fd)
     }
 
-    pub fn unlock_slave(&self) -> Result<()> {
+    fn unlock_slave(&self) -> Result<()> {
         unlockpt(&self.fd)
     }
 
-    pub fn get_slave_name(&self) -> Result<String> {
+    fn get_slave_name(&self) -> Result<String> {
         get_slave_name(&self.fd)
     }
 
-    pub fn get_slave_fd(&self) -> Result<RawFd> {
+    fn get_slave_fd(&self) -> Result<RawFd> {
         let slave_name = self.get_slave_name()?;
         let slave_fd = open(slave_name.as_str(), OFlag::O_RDWR, Mode::empty())?;
         Ok(slave_fd)
     }
 
-    pub fn get_file_handle(&self) -> Result<File> {
+    fn get_file_handle(&self) -> Result<File> {
         let fd = dup(self.as_raw_fd())?;
         let file = unsafe { File::from_raw_fd(fd) };
 
@@ -434,7 +504,6 @@ fn get_slave_name(fd: &PtyMaster) -> Result<String> {
 
 fn redirect_std_streams(fd: RawFd) -> Result<()> {
     // If fildes2 is already a valid open file descriptor, it shall be closed first
-    // but with this options it doesn't work properly...
 
     close(STDIN_FILENO)?;
     close(STDOUT_FILENO)?;
