@@ -113,3 +113,31 @@ fn send_controll() {
         process.wait().unwrap()
     );
 }
+
+#[test]
+fn send() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+    
+    futures_lite::future::block_on(async {
+        process.send("hello cat\n").await.unwrap();
+        let mut buf = vec![0; 128];
+        let n = process.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"hello cat\r\n");
+    });
+
+    assert_eq!(process.exit(true).unwrap(), true);
+}
+
+#[test]
+fn send_line() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+    
+    futures_lite::future::block_on(async {
+        process.send_line("hello cat").await.unwrap();
+        let mut buf = vec![0; 128];
+        let n = process.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"hello cat\r\n");
+    });
+
+    assert_eq!(process.exit(true).unwrap(), true);
+}

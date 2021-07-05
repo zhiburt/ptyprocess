@@ -103,3 +103,27 @@ fn send_controll() {
         process.wait().unwrap()
     );
 }
+
+#[test]
+fn send() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    process.send("hello cat\n").unwrap();
+    let mut buf = vec![0; 128];
+    let n = process.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n], b"hello cat\r\n");
+
+    assert_eq!(process.exit(true).unwrap(), true);
+}
+
+#[test]
+fn send_line() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    process.send_line("hello cat").unwrap();
+    let mut buf = vec![0; 128];
+    let n = process.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n], b"hello cat\r\n");
+
+    assert_eq!(process.exit(true).unwrap(), true);
+}

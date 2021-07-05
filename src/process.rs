@@ -346,12 +346,8 @@ impl PtyProcess {
         #[cfg(not(windows))]
         const LINE_ENDING: &[u8] = b"\n";
 
-        let bufs = &mut [
-            IoSlice::new(s.as_ref().as_bytes()),
-            IoSlice::new(LINE_ENDING),
-        ];
-
-        let _ = self.write_vectored(bufs).await?;
+        let _ = self.write_all(s.as_ref().as_bytes()).await?;
+        let _ = self.write_all(LINE_ENDING).await?;
         self.flush().await?;
 
         Ok(())
