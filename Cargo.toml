@@ -3,8 +3,14 @@ name = "ptyprocess"
 version = "0.1.0"
 authors = ["Maxim Zhiburt <zhiburt@gmail.com>"]
 edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "A library for cutting a string while preserving colors."
+repository = "https://github.com/zhiburt/ptyprocess"
+documentation = "https://docs.rs/ptyprocess"
+homepage = "https://github.com/zhiburt/ptyprocess"
+license = "MIT"
+readme = "README.md"
+keywords = ["PTY", "TTY", "fork"]
+categories = ["development-tools"]
 
 [features]
 default = ["sync"]
