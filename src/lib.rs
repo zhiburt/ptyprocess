@@ -1,6 +1,6 @@
 //! Ptyprocess library provides an interface for a PTY/TTY communications.
 //!
-//! ```
+//! ```no_run,ignore
 //! use ptyprocess::PtyProcess;
 //! use std::process::Command;
 //! use std::io::{Read, Write};
@@ -18,13 +18,13 @@
 //! ```
 //!
 //! # Async
-//! 
+//!
 //! The library provides an async IO operations for communication.
 //! To be able to use them you must to provide a feature flag `[async]`
 //! and turn off default features `default-features = false`
-//! 
+//!
 //! ## Example
-//! 
+//!
 //! ```no_run,ignore
 //! use ptyprocess::PtyProcess;
 //! use std::process::Command;

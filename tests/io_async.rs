@@ -117,7 +117,7 @@ fn send_controll() {
 #[test]
 fn send() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
-    
+
     futures_lite::future::block_on(async {
         process.send("hello cat\n").await.unwrap();
         let mut buf = vec![0; 128];
@@ -131,7 +131,7 @@ fn send() {
 #[test]
 fn send_line() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
-    
+
     futures_lite::future::block_on(async {
         process.send_line("hello cat").await.unwrap();
         let mut buf = vec![0; 128];

@@ -14,7 +14,6 @@ use nix::unistd::{
 use nix::{ioctl_write_ptr_bad, Error, Result};
 use signal::Signal::SIGKILL;
 use std::fs::File;
-use std::io::IoSlice;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::prelude::{AsRawFd, CommandExt, FromRawFd, RawFd};
 use std::process::{self, Command};
@@ -32,7 +31,7 @@ const DEFAULT_INTR_CHAR: u8 = 0x3; // ^C
 /// The structure implements `std::io::Read` and `std::io::Write` which communicates with
 /// a child.
 ///
-/// ```no_run
+/// ```no_run,ignore
 /// use ptyprocess::PtyProcess;
 /// use std::io::Write;
 /// use std::process::Command;
@@ -303,8 +302,8 @@ impl PtyProcess {
         const LINE_ENDING: &[u8] = b"\n";
 
         let bufs = &mut [
-            IoSlice::new(s.as_ref().as_bytes()),
-            IoSlice::new(LINE_ENDING),
+            std::io::IoSlice::new(s.as_ref().as_bytes()),
+            std::io::IoSlice::new(LINE_ENDING),
         ];
 
         let _ = self.write_vectored(bufs)?;
