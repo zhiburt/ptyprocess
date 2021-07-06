@@ -14,6 +14,7 @@ use nix::unistd::{
 use nix::{ioctl_write_ptr_bad, Error, Result};
 use signal::Signal::SIGKILL;
 use std::fs::File;
+use std::io::Read;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::prelude::{AsRawFd, CommandExt, FromRawFd, RawFd};
 use std::process::{self, Command};
@@ -282,6 +283,45 @@ impl PtyProcess {
 
         self.is_alive().map(|is_alive| !is_alive)
     }
+
+    pub fn try_read(&mut self) -> nix::Result<Option<u8>> {
+        let mut file = self.get_pty_handle()?;
+        make_non_blocking(file.as_raw_fd())?;
+
+        let mut buf = [0; 1];
+        let result = match file.read(&mut buf) {
+            Ok(0) => Ok(None),
+            Ok(1) => Ok(Some(buf[0])),
+            Ok(_) => unreachable!(),
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
+            Err(err) => {
+                let errno = err.raw_os_error().unwrap();
+                Err(nix::Error::Sys(nix::errno::Errno::from_i32(errno)))
+            }
+        };
+
+        // As file is DUPed changes in one descriptor affects all ones
+        // so we need to make blocking file after we finished.
+        make_blocking(file.as_raw_fd())?;
+
+        result
+    }
+}
+
+fn make_non_blocking(fd: RawFd) -> nix::Result<()> {
+    _make_non_blocking(fd, true)
+}
+
+fn make_blocking(fd: RawFd) -> nix::Result<()> {
+    _make_non_blocking(fd, false)
+}
+
+fn _make_non_blocking(fd: RawFd, blocking: bool) -> nix::Result<()> {
+    let opt = fcntl(fd, FcntlArg::F_GETFL)?;
+    let mut opt = OFlag::from_bits_truncate(opt);
+    opt.set(OFlag::O_NONBLOCK, blocking);
+    fcntl(fd, FcntlArg::F_SETFL(opt))?;
+    Ok(())
 }
 
 #[cfg(feature = "sync")]

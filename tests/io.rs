@@ -127,3 +127,49 @@ fn send_line() {
 
     assert_eq!(process.exit(true).unwrap(), true);
 }
+
+#[test]
+fn try_read() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    assert_eq!(process.try_read().unwrap(), None);
+
+    process.send_line("123").unwrap();
+
+    // give cat a time to react on input
+    thread::sleep(Duration::from_millis(100));
+
+    assert_eq!(process.try_read().unwrap(), Some(b'1'));
+    assert_eq!(process.try_read().unwrap(), Some(b'2'));
+    assert_eq!(process.try_read().unwrap(), Some(b'3'));
+    assert_eq!(process.try_read().unwrap(), Some(b'\r'));
+    assert_eq!(process.try_read().unwrap(), Some(b'\n'));
+    assert_eq!(process.try_read().unwrap(), None);
+}
+
+#[test]
+fn blocking_read_after_non_blocking_try_read() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    assert_eq!(process.try_read().unwrap(), None);
+
+    process.send_line("123").unwrap();
+
+    // give cat a time to react on input
+    thread::sleep(Duration::from_millis(100));
+
+    assert_eq!(process.try_read().unwrap(), Some(b'1'));
+
+    let mut buf = [0; 64];
+    let n = process.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n], b"23\r\n");
+
+    thread::spawn(move || {
+        let _ = process.read(&mut buf).unwrap();
+        // the error will be propagated in case of panic
+        panic!("it's unnexpected that read operation will be ended")
+    });
+
+    // give some time to read
+    thread::sleep(Duration::from_millis(100));
+}

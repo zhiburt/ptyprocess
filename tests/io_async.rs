@@ -1,6 +1,6 @@
 #![cfg(feature = "async")]
 
-use futures_lite::{AsyncReadExt, AsyncWriteExt};
+use futures_lite::{future, AsyncReadExt, AsyncWriteExt};
 use ptyprocess::{ControlCode, PtyProcess, Signal, WaitStatus};
 use std::{
     io::{BufRead, BufReader, LineWriter, Write},
@@ -29,7 +29,7 @@ fn cat() {
 
 #[test]
 fn cat_intr() {
-    futures_lite::future::block_on(async {
+    future::block_on(async {
         let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
         // this sleep solves an edge case of some cases when cat is somehow not "ready"
@@ -50,7 +50,7 @@ fn cat_intr() {
 
 #[test]
 fn cat_eof() {
-    futures_lite::future::block_on(async {
+    future::block_on(async {
         let mut proc = PtyProcess::spawn(Command::new("cat")).unwrap();
 
         // this sleep solves an edge case of some cases when cat is somehow not "ready"
@@ -73,7 +73,7 @@ fn read_after_eof() {
     command.arg(msg);
     let mut proc = PtyProcess::spawn(command).unwrap();
 
-    futures_lite::future::block_on(async {
+    future::block_on(async {
         let mut buf = Vec::new();
         proc.read_to_end(&mut buf).await.unwrap();
         assert_eq!(buf, format!("{}\r\n", msg).as_bytes());
@@ -92,7 +92,7 @@ fn ptyprocess_check_terminal_line_settings() {
     let mut proc = PtyProcess::spawn(command).unwrap();
 
     let mut buf = String::new();
-    futures_lite::future::block_on(async {
+    future::block_on(async {
         proc.read_to_string(&mut buf).await.unwrap();
     });
     println!("{}", buf);
@@ -104,7 +104,7 @@ fn ptyprocess_check_terminal_line_settings() {
 fn send_controll() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    futures_lite::future::block_on(async {
+    future::block_on(async {
         process.send_control(ControlCode::EOT).await.unwrap();
     });
 
@@ -118,7 +118,7 @@ fn send_controll() {
 fn send() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    futures_lite::future::block_on(async {
+    future::block_on(async {
         process.send("hello cat\n").await.unwrap();
         let mut buf = vec![0; 128];
         let n = process.read(&mut buf).await.unwrap();
@@ -132,7 +132,7 @@ fn send() {
 fn send_line() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    futures_lite::future::block_on(async {
+    future::block_on(async {
         process.send_line("hello cat").await.unwrap();
         let mut buf = vec![0; 128];
         let n = process.read(&mut buf).await.unwrap();
@@ -140,4 +140,50 @@ fn send_line() {
     });
 
     assert_eq!(process.exit(true).unwrap(), true);
+}
+
+#[test]
+fn try_read() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    assert_eq!(process.try_read().unwrap(), None);
+
+    future::block_on(process.send_line("123")).unwrap();
+
+    // give cat a time to react on input
+    thread::sleep(Duration::from_millis(100));
+
+    assert_eq!(process.try_read().unwrap(), Some(b'1'));
+    assert_eq!(process.try_read().unwrap(), Some(b'2'));
+    assert_eq!(process.try_read().unwrap(), Some(b'3'));
+    assert_eq!(process.try_read().unwrap(), Some(b'\r'));
+    assert_eq!(process.try_read().unwrap(), Some(b'\n'));
+    assert_eq!(process.try_read().unwrap(), None);
+}
+
+#[test]
+fn blocking_read_after_non_blocking_try_read() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    assert_eq!(process.try_read().unwrap(), None);
+
+    future::block_on(process.send_line("123")).unwrap();
+
+    // give cat a time to react on input
+    thread::sleep(Duration::from_millis(100));
+
+    assert_eq!(process.try_read().unwrap(), Some(b'1'));
+
+    let mut buf = [0; 64];
+    let n = future::block_on(process.read(&mut buf)).unwrap();
+    assert_eq!(&buf[..n], b"23\r\n");
+
+    thread::spawn(move || {
+        let _ = future::block_on(process.read(&mut buf)).unwrap();
+        // the error will be propagated in case of panic
+        panic!("it's unnexpected that read operation will be ended")
+    });
+
+    // give some time to read
+    thread::sleep(Duration::from_millis(100));
 }
