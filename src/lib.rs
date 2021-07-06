@@ -43,3 +43,4 @@ pub use crate::process::PtyProcess;
 
 pub use nix::sys::signal::Signal;
 pub use nix::sys::wait::WaitStatus;
+pub use nix::Error;
