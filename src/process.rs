@@ -284,16 +284,16 @@ impl PtyProcess {
         self.is_alive().map(|is_alive| !is_alive)
     }
 
-    /// Try read is a non-blocking read
-    pub fn try_read(&mut self) -> nix::Result<Option<u8>> {
+    /// Try to read in a non-blocking mode.
+    ///
+    /// It returns Ok(None) if there's nothing to read.
+    /// Otherwise it operates as general `std::io::Read` interface.
+    pub fn try_read(&mut self, mut buf: &mut [u8]) -> nix::Result<Option<usize>> {
         let mut file = self.get_pty_handle()?;
         make_non_blocking(file.as_raw_fd())?;
 
-        let mut buf = [0; 1];
         let result = match file.read(&mut buf) {
-            Ok(0) => Ok(None),
-            Ok(1) => Ok(Some(buf[0])),
-            Ok(_) => unreachable!(),
+            Ok(n) => Ok(Some(n)),
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
             Err(err) => {
                 let errno = err.raw_os_error().unwrap();
@@ -306,6 +306,26 @@ impl PtyProcess {
         make_blocking(file.as_raw_fd())?;
 
         result
+    }
+
+    /// Try to read a byte in a non-blocking mode.
+    ///
+    /// Returns:
+    ///     - `None` if there's nothing to read.
+    ///     - `Some(None)` on eof.
+    ///     - `Some(Some(byte))` on sucessfull call.
+    ///
+    /// For more information look at [`try_read`].
+    ///
+    /// [`try_read`]: struct.PtyProcess.html#method.try_read
+    pub fn try_read_byte(&mut self) -> nix::Result<Option<Option<u8>>> {
+        let mut buf = [0; 1];
+        match self.try_read(&mut buf)? {
+            Some(1) => Ok(Some(Some(buf[0]))),
+            Some(0) => Ok(Some(None)),
+            None => Ok(None),
+            Some(_) => unreachable!(),
+        }
     }
 }
 
@@ -345,6 +365,7 @@ impl PtyProcess {
         let bufs = &mut [
             std::io::IoSlice::new(s.as_ref().as_bytes()),
             std::io::IoSlice::new(LINE_ENDING),
+            std::io::IoSlice::new(&[]), // we need to add a empty one as it may be not written.
         ];
 
         let _ = self.write_vectored(bufs)?;

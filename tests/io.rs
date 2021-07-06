@@ -108,10 +108,11 @@ fn send_controll() {
 fn send() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    process.send("hello cat\n").unwrap();
-    let mut buf = vec![0; 128];
-    let n = process.read(&mut buf).unwrap();
-    assert_eq!(&buf[..n], b"hello cat\r\n");
+    let msg = "hello cat\n";
+    process.send(msg).unwrap();
+    let mut buf = vec![0; msg.len()+1];
+    process.read_exact(&mut buf).unwrap();
+    assert_eq!(&buf, b"hello cat\r\n");
 
     assert_eq!(process.exit(true).unwrap(), true);
 }
@@ -129,36 +130,36 @@ fn send_line() {
 }
 
 #[test]
-fn try_read() {
+fn try_read_byte() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    assert_eq!(process.try_read().unwrap(), None);
+    assert_eq!(process.try_read_byte().unwrap(), None);
 
     process.send_line("123").unwrap();
 
     // give cat a time to react on input
     thread::sleep(Duration::from_millis(100));
 
-    assert_eq!(process.try_read().unwrap(), Some(b'1'));
-    assert_eq!(process.try_read().unwrap(), Some(b'2'));
-    assert_eq!(process.try_read().unwrap(), Some(b'3'));
-    assert_eq!(process.try_read().unwrap(), Some(b'\r'));
-    assert_eq!(process.try_read().unwrap(), Some(b'\n'));
-    assert_eq!(process.try_read().unwrap(), None);
+    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'1')));
+    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'2')));
+    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'3')));
+    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'\r')));
+    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'\n')));
+    assert_eq!(process.try_read_byte().unwrap(), None);
 }
 
 #[test]
-fn blocking_read_after_non_blocking_try_read() {
+fn blocking_read_after_non_blocking_try_read_byte() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    assert_eq!(process.try_read().unwrap(), None);
+    assert_eq!(process.try_read_byte().unwrap(), None);
 
     process.send_line("123").unwrap();
 
     // give cat a time to react on input
     thread::sleep(Duration::from_millis(100));
 
-    assert_eq!(process.try_read().unwrap(), Some(b'1'));
+    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'1')));
 
     let mut buf = [0; 64];
     let n = process.read(&mut buf).unwrap();
@@ -172,4 +173,65 @@ fn blocking_read_after_non_blocking_try_read() {
 
     // give some time to read
     thread::sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn try_read() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    let mut buf = vec![0; 128];
+    assert_eq!(process.try_read(&mut buf).unwrap(), None);
+
+    process.send_line("123").unwrap();
+
+    // give cat a time to react on input
+    thread::sleep(Duration::from_millis(100));
+
+    assert_eq!(process.try_read(&mut buf).unwrap(), Some(5));
+    assert_eq!(&buf[..5], b"123\r\n");
+    assert_eq!(process.try_read(&mut buf).unwrap(), None);
+}
+
+#[test]
+fn blocking_read_after_non_blocking_try_read() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    let mut buf = vec![0; 1];
+    assert_eq!(process.try_read(&mut buf).unwrap(), None);
+
+    process.send_line("123").unwrap();
+
+    // give cat a time to react on input
+    thread::sleep(Duration::from_millis(100));
+
+    assert_eq!(process.try_read(&mut buf).unwrap(), Some(1));
+    assert_eq!(&buf[..1], b"1");
+
+    let mut buf = [0; 64];
+    let n = process.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n], b"23\r\n");
+
+    thread::spawn(move || {
+        let _ = process.read(&mut buf).unwrap();
+        // the error will be propagated in case of panic
+        panic!("it's unnexpected that read operation will be ended")
+    });
+
+    // give some time to read
+    thread::sleep(Duration::from_millis(100));
+}
+
+#[test]
+fn try_read_after_eof() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    process.send_line("hello").unwrap();
+
+    // give cat a time to react on input
+    thread::sleep(Duration::from_millis(100));
+
+    let mut buf = vec![0; 128];
+    assert_eq!(process.try_read(&mut buf).unwrap(), Some(7));
+    assert_eq!(process.try_read(&mut buf).unwrap(), None);
+    assert_eq!(process.try_read_byte().unwrap(), None);
 }
