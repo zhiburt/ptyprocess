@@ -284,6 +284,7 @@ impl PtyProcess {
         self.is_alive().map(|is_alive| !is_alive)
     }
 
+    /// Try read is a non-blocking read
     pub fn try_read(&mut self) -> nix::Result<Option<u8>> {
         let mut file = self.get_pty_handle()?;
         make_non_blocking(file.as_raw_fd())?;
