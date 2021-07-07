@@ -13,7 +13,7 @@ keywords = ["PTY", "TTY", "fork"]
 categories = ["development-tools"]
 
 [features]
-default = ["async"]
+default = ["sync"]
 sync = []
 async = ["async-fs", "futures-lite", "pin-project"]
 
