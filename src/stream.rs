@@ -146,6 +146,8 @@ mod async_stream {
         /// It returns Ok(None) if there's nothing to read.
         /// Otherwise it operates as general `std::io::Read` interface.
         pub async fn try_read(&mut self, mut buf: &mut [u8]) -> io::Result<Option<usize>> {
+            // future::poll_once was testing but it doesn't work why?
+
             let fd = self.inner.as_raw_fd();
             make_non_blocking(fd).map_err(nix_error_to_io)?;
 
