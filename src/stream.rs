@@ -10,18 +10,26 @@ mod sync_stream {
     use super::*;
     use std::{
         fs::File,
-        io::{self, Read, Write},
+        io::{self, BufRead, BufReader, Read, Write},
         os::unix::prelude::AsRawFd,
     };
 
     #[derive(Debug)]
     pub struct Stream {
         inner: File,
+        reader: BufReader<File>,
     }
 
     impl Stream {
         pub fn new(file: File) -> Self {
-            Self { inner: file }
+            let copy_file = file
+                .try_clone()
+                .expect("It's ok to clone fd as it will be just DUPed");
+            let reader = BufReader::new(copy_file);
+            Self {
+                inner: file,
+                reader,
+            }
         }
 
         /// Try to read in a non-blocking mode.
@@ -82,10 +90,20 @@ mod sync_stream {
 
     impl Read for Stream {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            match self.inner.read(buf) {
+            match self.reader.read(buf) {
                 Err(ref err) if has_reached_end_of_sdtout(err) => Ok(0),
                 result => result,
             }
+        }
+    }
+
+    impl BufRead for Stream {
+        fn fill_buf(&mut self) -> io::Result<&[u8]> {
+            self.reader.fill_buf()
+        }
+
+        fn consume(&mut self, amt: usize) {
+            self.reader.consume(amt)
         }
     }
 }
@@ -94,7 +112,7 @@ mod sync_stream {
 mod async_stream {
     use super::*;
     use crate::util::{make_blocking, make_non_blocking, nix_error_to_io};
-    use futures_lite::{AsyncRead, AsyncReadExt, AsyncWrite};
+    use futures_lite::{io::BufReader, AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite};
     use std::{
         fs::File,
         io,
@@ -103,15 +121,24 @@ mod async_stream {
         task::{Context, Poll},
     };
 
+    #[pin_project::pin_project]
     #[derive(Debug)]
     pub struct AsyncStream {
         inner: async_fs::File,
+        reader: BufReader<async_fs::File>,
     }
 
     impl AsyncStream {
         pub fn new(file: File) -> Self {
+            let cloned = file.try_clone().unwrap();
             let file = async_fs::File::from(file);
-            Self { inner: file }
+            let file_cloned = async_fs::File::from(cloned);
+            let reader = BufReader::new(file_cloned);
+
+            Self {
+                inner: file,
+                reader,
+            }
         }
 
         /// Try to read in a non-blocking mode.
@@ -156,21 +183,6 @@ mod async_stream {
         }
     }
 
-    impl AsyncRead for AsyncStream {
-        fn poll_read(
-            mut self: Pin<&mut Self>,
-            cx: &mut Context<'_>,
-            buf: &mut [u8],
-        ) -> Poll<io::Result<usize>> {
-            let future =
-                <async_fs::File as AsyncRead>::poll_read(Pin::new(&mut self.inner), cx, buf);
-            match future {
-                Poll::Ready(Err(ref err)) if has_reached_end_of_sdtout(err) => Poll::Ready(Ok(0)),
-                _ => future,
-            }
-        }
-    }
-
     impl AsyncWrite for AsyncStream {
         fn poll_write(
             mut self: Pin<&mut Self>,
@@ -194,6 +206,36 @@ mod async_stream {
             bufs: &[io::IoSlice<'_>],
         ) -> Poll<io::Result<usize>> {
             <async_fs::File as AsyncWrite>::poll_write_vectored(Pin::new(&mut self.inner), cx, bufs)
+        }
+    }
+
+    impl AsyncRead for AsyncStream {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<io::Result<usize>> {
+            let future = Pin::new(&mut self.reader).poll_read(cx, buf);
+            match future {
+                Poll::Ready(Err(ref err)) if has_reached_end_of_sdtout(err) => Poll::Ready(Ok(0)),
+                _ => future,
+            }
+        }
+    }
+
+    impl AsyncBufRead for AsyncStream {
+        fn poll_fill_buf<'a>(
+            self: Pin<&'a mut Self>,
+            cx: &mut Context<'_>,
+        ) -> Poll<io::Result<&'a [u8]>> {
+            // pin_project is used only for this function.
+            // the solution was found in the original implementation of BufReader.
+            let this = self.project();
+            Pin::new(this.reader).poll_fill_buf(cx)
+        }
+
+        fn consume(mut self: Pin<&mut Self>, amt: usize) {
+            Pin::new(&mut self.reader).consume(amt)
         }
     }
 }

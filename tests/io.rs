@@ -108,11 +108,14 @@ fn send_controll() {
 fn send() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    let msg = "hello cat\n";
-    process.send(msg).unwrap();
-    let mut buf = vec![0; msg.len() + 1];
-    process.read_exact(&mut buf).unwrap();
-    assert_eq!(&buf, b"hello cat\r\n");
+    process.send("hello cat\n").unwrap();
+
+    // give cat a time to react on input
+    thread::sleep(Duration::from_millis(100));
+
+    let mut buf = vec![0; 128];
+    let n = process.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n], b"hello cat\r\n");
 
     assert_eq!(process.exit(true).unwrap(), true);
 }
@@ -122,6 +125,10 @@ fn send_line() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
     process.send_line("hello cat").unwrap();
+
+    // give cat a time to react on input
+    thread::sleep(Duration::from_millis(100));
+
     let mut buf = vec![0; 128];
     let n = process.read(&mut buf).unwrap();
     assert_eq!(&buf[..n], b"hello cat\r\n");
@@ -250,4 +257,42 @@ fn try_read_after_process_exit() {
     assert_eq!(proc.try_read(&mut buf).unwrap(), Some(11));
     assert_eq!(&buf[..11], b"hello cat\r\n");
     assert_eq!(proc.try_read(&mut buf).unwrap(), Some(0));
+}
+
+#[test]
+fn read_line() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    process.send_line("Hello World 1").unwrap();
+    process.send_line("Hello World 2").unwrap();
+
+    let mut buf = String::new();
+    process.read_line(&mut buf).unwrap();
+    assert_eq!(&buf, "Hello World 1\r\n");
+
+    let mut buf = String::new();
+    process.read_line(&mut buf).unwrap();
+    assert_eq!(&buf, "Hello World 2\r\n");
+
+    assert_eq!(process.exit(true).unwrap(), true);
+}
+
+#[test]
+fn read_until() {
+    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    process.send_line("Hello World 1").unwrap();
+
+    // give cat a time to react on input
+    thread::sleep(Duration::from_millis(100));
+
+    let mut buf = Vec::new();
+    let n = process.read_until(b' ', &mut buf).unwrap();
+    assert_eq!(&buf[..n], b"Hello ");
+
+    let mut buf = vec![0; 128];
+    let n = process.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n], b"World 1\r\n");
+
+    assert_eq!(process.exit(true).unwrap(), true);
 }
