@@ -5,10 +5,13 @@ pub type Stream = async_stream::AsyncStream;
 
 #[cfg(feature = "sync")]
 mod sync_stream {
+    use crate::util::{make_blocking, make_non_blocking, nix_error_to_io};
+
     use super::*;
     use std::{
         fs::File,
         io::{self, Read, Write},
+        os::unix::prelude::AsRawFd,
     };
 
     #[derive(Debug)]
@@ -19,6 +22,47 @@ mod sync_stream {
     impl Stream {
         pub fn new(file: File) -> Self {
             Self { inner: file }
+        }
+
+        /// Try to read in a non-blocking mode.
+        ///
+        /// It returns Ok(None) if there's nothing to read.
+        /// Otherwise it operates as general `std::io::Read` interface.
+        pub fn try_read(&mut self, mut buf: &mut [u8]) -> io::Result<Option<usize>> {
+            let fd = self.inner.as_raw_fd();
+            make_non_blocking(fd).map_err(nix_error_to_io)?;
+
+            let result = match self.read(&mut buf) {
+                Ok(n) => Ok(Some(n)),
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
+                Err(err) => Err(err),
+            };
+
+            // As file is DUPed changes in one descriptor affects all ones
+            // so we need to make blocking file after we finished.
+            make_blocking(fd).map_err(nix_error_to_io)?;
+
+            result
+        }
+
+        /// Try to read a byte in a non-blocking mode.
+        ///
+        /// Returns:
+        ///     - `None` if there's nothing to read.
+        ///     - `Some(None)` on eof.
+        ///     - `Some(Some(byte))` on sucessfull call.
+        ///
+        /// For more information look at [`try_read`].
+        ///
+        /// [`try_read`]: struct.PtyProcess.html#method.try_read
+        pub fn try_read_byte(&mut self) -> io::Result<Option<Option<u8>>> {
+            let mut buf = [0; 1];
+            match self.try_read(&mut buf)? {
+                Some(1) => Ok(Some(Some(buf[0]))),
+                Some(0) => Ok(Some(None)),
+                None => Ok(None),
+                Some(_) => unreachable!(),
+            }
         }
     }
 
@@ -49,10 +93,12 @@ mod sync_stream {
 #[cfg(feature = "async")]
 mod async_stream {
     use super::*;
-    use futures_lite::{AsyncRead, AsyncWrite};
+    use crate::util::{make_blocking, make_non_blocking, nix_error_to_io};
+    use futures_lite::{AsyncRead, AsyncReadExt, AsyncWrite};
     use std::{
         fs::File,
         io,
+        os::unix::prelude::AsRawFd,
         pin::Pin,
         task::{Context, Poll},
     };
@@ -66,6 +112,47 @@ mod async_stream {
         pub fn new(file: File) -> Self {
             let file = async_fs::File::from(file);
             Self { inner: file }
+        }
+
+        /// Try to read in a non-blocking mode.
+        ///
+        /// It returns Ok(None) if there's nothing to read.
+        /// Otherwise it operates as general `std::io::Read` interface.
+        pub async fn try_read(&mut self, mut buf: &mut [u8]) -> io::Result<Option<usize>> {
+            let fd = self.inner.as_raw_fd();
+            make_non_blocking(fd).map_err(nix_error_to_io)?;
+
+            let result = match self.read(&mut buf).await {
+                Ok(n) => Ok(Some(n)),
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
+                Err(err) => Err(err),
+            };
+
+            // As file is DUPed changes in one descriptor affects all ones
+            // so we need to make blocking file after we finished.
+            make_blocking(fd).map_err(nix_error_to_io)?;
+
+            result
+        }
+
+        /// Try to read a byte in a non-blocking mode.
+        ///
+        /// Returns:
+        ///     - `None` if there's nothing to read.
+        ///     - `Some(None)` on eof.
+        ///     - `Some(Some(byte))` on sucessfull call.
+        ///
+        /// For more information look at [`try_read`].
+        ///
+        /// [`try_read`]: struct.PtyProcess.html#method.try_read
+        pub async fn try_read_byte(&mut self) -> io::Result<Option<Option<u8>>> {
+            let mut buf = [0; 1];
+            match self.try_read(&mut buf).await? {
+                Some(1) => Ok(Some(Some(buf[0]))),
+                Some(0) => Ok(Some(None)),
+                None => Ok(None),
+                Some(_) => unreachable!(),
+            }
         }
     }
 
@@ -111,6 +198,6 @@ mod async_stream {
     }
 }
 
-fn has_reached_end_of_sdtout(err: &std::io::Error) -> bool {
+pub fn has_reached_end_of_sdtout(err: &std::io::Error) -> bool {
     err.kind() == std::io::ErrorKind::Other && err.raw_os_error() == Some(5)
 }

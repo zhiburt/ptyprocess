@@ -61,12 +61,14 @@ fn cat_eof() {
 }
 
 #[test]
-fn read_after_eof() {
+fn read_after_process_exit() {
     let msg = "hello cat";
 
     let mut command = Command::new("echo");
     command.arg(msg);
     let mut proc = PtyProcess::spawn(command).unwrap();
+
+    assert_eq!(WaitStatus::Exited(proc.pid(), 0), proc.wait().unwrap());
 
     let mut buf = Vec::new();
     proc.read_to_end(&mut buf).unwrap();
@@ -74,8 +76,6 @@ fn read_after_eof() {
 
     assert_eq!(0, proc.read(&mut buf).unwrap());
     assert_eq!(0, proc.read(&mut buf).unwrap());
-
-    assert_eq!(WaitStatus::Exited(proc.pid(), 0), proc.wait().unwrap());
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn send() {
 
     let msg = "hello cat\n";
     process.send(msg).unwrap();
-    let mut buf = vec![0; msg.len()+1];
+    let mut buf = vec![0; msg.len() + 1];
     process.read_exact(&mut buf).unwrap();
     assert_eq!(&buf, b"hello cat\r\n");
 
@@ -234,4 +234,20 @@ fn try_read_after_eof() {
     assert_eq!(process.try_read(&mut buf).unwrap(), Some(7));
     assert_eq!(process.try_read(&mut buf).unwrap(), None);
     assert_eq!(process.try_read_byte().unwrap(), None);
+}
+
+#[test]
+fn try_read_after_process_exit() {
+    let msg = "hello cat";
+
+    let mut command = Command::new("echo");
+    command.arg(msg);
+    let mut proc = PtyProcess::spawn(command).unwrap();
+
+    assert_eq!(WaitStatus::Exited(proc.pid(), 0), proc.wait().unwrap());
+
+    let mut buf = vec![0; 128];
+    assert_eq!(proc.try_read(&mut buf).unwrap(), Some(11));
+    assert_eq!(&buf[..11], b"hello cat\r\n");
+    assert_eq!(proc.try_read(&mut buf).unwrap(), Some(0));
 }

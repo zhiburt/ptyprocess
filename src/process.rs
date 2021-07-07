@@ -14,7 +14,6 @@ use nix::unistd::{
 use nix::{ioctl_write_ptr_bad, Error, Result};
 use signal::Signal::SIGKILL;
 use std::fs::File;
-use std::io::Read;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::prelude::{AsRawFd, CommandExt, FromRawFd, RawFd};
 use std::process::{self, Command};
@@ -283,66 +282,6 @@ impl PtyProcess {
 
         self.is_alive().map(|is_alive| !is_alive)
     }
-
-    /// Try to read in a non-blocking mode.
-    ///
-    /// It returns Ok(None) if there's nothing to read.
-    /// Otherwise it operates as general `std::io::Read` interface.
-    pub fn try_read(&mut self, mut buf: &mut [u8]) -> nix::Result<Option<usize>> {
-        let mut file = self.get_pty_handle()?;
-        make_non_blocking(file.as_raw_fd())?;
-
-        let result = match file.read(&mut buf) {
-            Ok(n) => Ok(Some(n)),
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
-            Err(err) => {
-                let errno = err.raw_os_error().unwrap();
-                Err(nix::Error::Sys(nix::errno::Errno::from_i32(errno)))
-            }
-        };
-
-        // As file is DUPed changes in one descriptor affects all ones
-        // so we need to make blocking file after we finished.
-        make_blocking(file.as_raw_fd())?;
-
-        result
-    }
-
-    /// Try to read a byte in a non-blocking mode.
-    ///
-    /// Returns:
-    ///     - `None` if there's nothing to read.
-    ///     - `Some(None)` on eof.
-    ///     - `Some(Some(byte))` on sucessfull call.
-    ///
-    /// For more information look at [`try_read`].
-    ///
-    /// [`try_read`]: struct.PtyProcess.html#method.try_read
-    pub fn try_read_byte(&mut self) -> nix::Result<Option<Option<u8>>> {
-        let mut buf = [0; 1];
-        match self.try_read(&mut buf)? {
-            Some(1) => Ok(Some(Some(buf[0]))),
-            Some(0) => Ok(Some(None)),
-            None => Ok(None),
-            Some(_) => unreachable!(),
-        }
-    }
-}
-
-fn make_non_blocking(fd: RawFd) -> nix::Result<()> {
-    _make_non_blocking(fd, true)
-}
-
-fn make_blocking(fd: RawFd) -> nix::Result<()> {
-    _make_non_blocking(fd, false)
-}
-
-fn _make_non_blocking(fd: RawFd, blocking: bool) -> nix::Result<()> {
-    let opt = fcntl(fd, FcntlArg::F_GETFL)?;
-    let mut opt = OFlag::from_bits_truncate(opt);
-    opt.set(OFlag::O_NONBLOCK, blocking);
-    fcntl(fd, FcntlArg::F_SETFL(opt))?;
-    Ok(())
 }
 
 #[cfg(feature = "sync")]

@@ -1,6 +1,6 @@
 #![cfg(feature = "async")]
 
-use futures_lite::{future, AsyncReadExt, AsyncWriteExt};
+use futures_lite::{future::block_on, AsyncReadExt, AsyncWriteExt};
 use ptyprocess::{ControlCode, PtyProcess, Signal, WaitStatus};
 use std::{
     io::{BufRead, BufReader, LineWriter, Write},
@@ -29,7 +29,7 @@ fn cat() {
 
 #[test]
 fn cat_intr() {
-    future::block_on(async {
+    block_on(async {
         let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
         // this sleep solves an edge case of some cases when cat is somehow not "ready"
@@ -50,7 +50,7 @@ fn cat_intr() {
 
 #[test]
 fn cat_eof() {
-    future::block_on(async {
+    block_on(async {
         let mut proc = PtyProcess::spawn(Command::new("cat")).unwrap();
 
         // this sleep solves an edge case of some cases when cat is somehow not "ready"
@@ -66,22 +66,22 @@ fn cat_eof() {
 }
 
 #[test]
-fn read_after_eof() {
+fn read_after_process_exit() {
     let msg = "hello cat";
 
     let mut command = Command::new("echo");
     command.arg(msg);
     let mut proc = PtyProcess::spawn(command).unwrap();
 
-    future::block_on(async {
+    assert_eq!(WaitStatus::Exited(proc.pid(), 0), proc.wait().unwrap());
+
+    block_on(async {
         let mut buf = Vec::new();
         proc.read_to_end(&mut buf).await.unwrap();
         assert_eq!(buf, format!("{}\r\n", msg).as_bytes());
 
         assert_eq!(0, proc.read(&mut buf).await.unwrap());
         assert_eq!(0, proc.read(&mut buf).await.unwrap());
-
-        assert_eq!(WaitStatus::Exited(proc.pid(), 0), proc.wait().unwrap());
     })
 }
 
@@ -92,7 +92,7 @@ fn ptyprocess_check_terminal_line_settings() {
     let mut proc = PtyProcess::spawn(command).unwrap();
 
     let mut buf = String::new();
-    future::block_on(async {
+    block_on(async {
         proc.read_to_string(&mut buf).await.unwrap();
     });
     println!("{}", buf);
@@ -104,7 +104,7 @@ fn ptyprocess_check_terminal_line_settings() {
 fn send_controll() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    future::block_on(async {
+    block_on(async {
         process.send_control(ControlCode::EOT).await.unwrap();
     });
 
@@ -118,7 +118,7 @@ fn send_controll() {
 fn send() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    future::block_on(async {
+    block_on(async {
         process.send("hello cat\n").await.unwrap();
         let mut buf = vec![0; 128];
         let n = process.read(&mut buf).await.unwrap();
@@ -132,7 +132,7 @@ fn send() {
 fn send_line() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    future::block_on(async {
+    block_on(async {
         process.send_line("hello cat").await.unwrap();
         let mut buf = vec![0; 128];
         let n = process.read(&mut buf).await.unwrap();
@@ -146,105 +146,132 @@ fn send_line() {
 fn try_read_byte() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    assert_eq!(process.try_read_byte().unwrap(), None);
+    block_on(async {
+        assert_eq!(process.try_read_byte().await.unwrap(), None);
 
-    future::block_on(process.send_line("123")).unwrap();
+        process.send_line("123").await.unwrap();
 
-    // give cat a time to react on input
-    thread::sleep(Duration::from_millis(100));
+        // give cat a time to react on input
+        thread::sleep(Duration::from_millis(100));
 
-    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'1')));
-    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'2')));
-    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'3')));
-    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'\r')));
-    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'\n')));
-    assert_eq!(process.try_read_byte().unwrap(), None);
+        assert_eq!(process.try_read_byte().await.unwrap(), Some(Some(b'1')));
+        assert_eq!(process.try_read_byte().await.unwrap(), Some(Some(b'2')));
+        assert_eq!(process.try_read_byte().await.unwrap(), Some(Some(b'3')));
+        assert_eq!(process.try_read_byte().await.unwrap(), Some(Some(b'\r')));
+        assert_eq!(process.try_read_byte().await.unwrap(), Some(Some(b'\n')));
+        assert_eq!(process.try_read_byte().await.unwrap(), None);
+    })
 }
 
 #[test]
 fn blocking_read_after_non_blocking_try_read_byte() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    assert_eq!(process.try_read_byte().unwrap(), None);
+    block_on(async {
+        assert_eq!(process.try_read_byte().await.unwrap(), None);
 
-    future::block_on(process.send_line("123")).unwrap();
+        process.send_line("123").await.unwrap();
 
-    // give cat a time to react on input
-    thread::sleep(Duration::from_millis(100));
+        // give cat a time to react on input
+        thread::sleep(Duration::from_millis(100));
 
-    assert_eq!(process.try_read_byte().unwrap(), Some(Some(b'1')));
+        assert_eq!(process.try_read_byte().await.unwrap(), Some(Some(b'1')));
 
-    let mut buf = [0; 64];
-    let n = future::block_on(process.read(&mut buf)).unwrap();
-    assert_eq!(&buf[..n], b"23\r\n");
+        let mut buf = [0; 64];
+        let n = process.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"23\r\n");
 
-    thread::spawn(move || {
-        let _ = future::block_on(process.read(&mut buf)).unwrap();
-        // the error will be propagated in case of panic
-        panic!("it's unnexpected that read operation will be ended")
+        thread::spawn(move || {
+            // It must be allowed block_on
+            let _ = block_on(process.read(&mut buf)).unwrap();
+            // the error will be propagated in case of panic
+            panic!("it's unnexpected that read operation will be ended")
+        });
+
+        // give some time to read
+        thread::sleep(Duration::from_millis(100));
     });
-
-    // give some time to read
-    thread::sleep(Duration::from_millis(100));
 }
 
 #[test]
 fn try_read() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    let mut buf = vec![0; 128];
-    assert_eq!(process.try_read(&mut buf).unwrap(), None);
+    block_on(async {
+        let mut buf = vec![0; 128];
+        assert_eq!(process.try_read(&mut buf).await.unwrap(), None);
 
-    future::block_on(process.send_line("123")).unwrap();
+        process.send_line("123").await.unwrap();
 
-    // give cat a time to react on input
-    thread::sleep(Duration::from_millis(100));
+        // give cat a time to react on input
+        thread::sleep(Duration::from_millis(100));
 
-    assert_eq!(process.try_read(&mut buf).unwrap(), Some(5));
-    assert_eq!(&buf[..5], b"123\r\n");
-    assert_eq!(process.try_read(&mut buf).unwrap(), None);
+        assert_eq!(process.try_read(&mut buf).await.unwrap(), Some(5));
+        assert_eq!(&buf[..5], b"123\r\n");
+        assert_eq!(process.try_read(&mut buf).await.unwrap(), None);
+    });
 }
 
 #[test]
 fn blocking_read_after_non_blocking_try_read() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    let mut buf = vec![0; 1];
-    assert_eq!(process.try_read(&mut buf).unwrap(), None);
+    block_on(async {
+        let mut buf = vec![0; 1];
+        assert_eq!(process.try_read(&mut buf).await.unwrap(), None);
 
-    future::block_on(process.send_line("123")).unwrap();
+        process.send_line("123").await.unwrap();
 
-    // give cat a time to react on input
-    thread::sleep(Duration::from_millis(100));
+        // give cat a time to react on input
+        thread::sleep(Duration::from_millis(100));
 
-    assert_eq!(process.try_read(&mut buf).unwrap(), Some(1));
-    assert_eq!(&buf[..1], b"1");
+        assert_eq!(process.try_read(&mut buf).await.unwrap(), Some(1));
+        assert_eq!(&buf[..1], b"1");
 
-    let mut buf = [0; 64];
-    let n = future::block_on(process.read(&mut buf)).unwrap();
-    assert_eq!(&buf[..n], b"23\r\n");
+        let mut buf = [0; 64];
+        let n = process.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"23\r\n");
 
-    thread::spawn(move || {
-        let _ = future::block_on(process.read(&mut buf)).unwrap();
-        // the error will be propagated in case of panic
-        panic!("it's unnexpected that read operation will be ended")
+        thread::spawn(move || {
+            let _ = block_on(process.read(&mut buf)).unwrap();
+            // the error will be propagated in case of panic
+            panic!("it's unnexpected that read operation will be ended")
+        });
+
+        // give some time to read
+        thread::sleep(Duration::from_millis(100));
     });
-
-    // give some time to read
-    thread::sleep(Duration::from_millis(100));
 }
 
 #[test]
 fn try_read_after_eof() {
     let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
 
-    future::block_on(process.send_line("hello")).unwrap();
+    block_on(async {
+        process.send_line("hello").await.unwrap();
 
-    // give cat a time to react on input
-    thread::sleep(Duration::from_millis(100));
+        // give cat a time to react on input
+        thread::sleep(Duration::from_millis(100));
 
-    let mut buf = vec![0; 128];
-    assert_eq!(process.try_read(&mut buf).unwrap(), Some(7));
-    assert_eq!(process.try_read(&mut buf).unwrap(), None);
-    assert_eq!(process.try_read_byte().unwrap(), None);
+        let mut buf = vec![0; 128];
+        assert_eq!(process.try_read(&mut buf).await.unwrap(), Some(7));
+        assert_eq!(process.try_read(&mut buf).await.unwrap(), None);
+        assert_eq!(process.try_read_byte().await.unwrap(), None);
+    });
+}
+
+#[test]
+fn try_read_after_process_exit() {
+    let mut command = Command::new("echo");
+    command.arg("hello cat");
+    let mut proc = PtyProcess::spawn(command).unwrap();
+
+    assert_eq!(WaitStatus::Exited(proc.pid(), 0), proc.wait().unwrap());
+
+    block_on(async {
+        let mut buf = vec![0; 128];
+        assert_eq!(proc.try_read(&mut buf).await.unwrap(), Some(11));
+        assert_eq!(&buf[..11], b"hello cat\r\n");
+        assert_eq!(proc.try_read(&mut buf).await.unwrap(), Some(0));
+    });
 }
