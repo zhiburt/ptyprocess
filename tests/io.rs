@@ -259,7 +259,7 @@ fn try_read_after_process_exit() {
     assert_eq!(&buf[..11], b"hello cat\r\n");
 
     // on macos next try read need some time
-    thread::sleep(Duration::from_millis(300));
+    thread::sleep(Duration::from_millis(600));
 
     assert_eq!(proc.try_read(&mut buf).unwrap(), Some(0));
 
