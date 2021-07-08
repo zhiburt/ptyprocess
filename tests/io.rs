@@ -262,9 +262,8 @@ fn try_read_after_process_exit() {
     assert!(matches!(proc.try_read(&mut buf).unwrap(), Some(11) | None));
     assert!(matches!(proc.try_read(&mut buf).unwrap(), Some(0) | None));
 
-        // on macos we can't put it before read's for some reason something get blocked
-        assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
-
+    // on macos we can't put it before read's for some reason something get blocked
+    assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
 }
 
 #[test]
