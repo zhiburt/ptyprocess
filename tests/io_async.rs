@@ -276,15 +276,14 @@ fn try_read_after_process_exit() {
     let mut command = Command::new("echo");
     command.arg("hello cat");
     let mut proc = PtyProcess::spawn(command).unwrap();
-    assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
-
-    // on macos we may not able to read after process is dead.
-    // I assume that kernel consumes proceses resorces without any code check of parent,
-    // which what is happening on linux.
-    //
-    // So we check that there may be None or Some(0)
 
     block_on(async {
+        // on macos we may not able to read after process is dead.
+        // I assume that kernel consumes proceses resorces without any code check of parent,
+        // which what is happening on linux.
+        //
+        // So we check that there may be None or Some(0)
+
         let mut buf = vec![0; 128];
         assert!(matches!(
             proc.try_read(&mut buf).await.unwrap(),
@@ -294,6 +293,9 @@ fn try_read_after_process_exit() {
             proc.try_read(&mut buf).await.unwrap(),
             Some(0) | None
         ));
+
+        // on macos we can't put it before read's for some reason something get blocked
+        assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
     });
 }
 

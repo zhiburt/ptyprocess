@@ -252,8 +252,6 @@ fn try_read_after_process_exit() {
     command.arg(msg);
     let mut proc = PtyProcess::spawn(command).unwrap();
 
-    assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
-
     // on macos we may not able to read after process is dead.
     // I assume that kernel consumes proceses resorces without any code check of parent,
     // which what is happening on linux.
@@ -263,6 +261,10 @@ fn try_read_after_process_exit() {
     let mut buf = vec![0; 128];
     assert!(matches!(proc.try_read(&mut buf).unwrap(), Some(11) | None));
     assert!(matches!(proc.try_read(&mut buf).unwrap(), Some(0) | None));
+
+        // on macos we can't put it before read's for some reason something get blocked
+        assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
+
 }
 
 #[test]
