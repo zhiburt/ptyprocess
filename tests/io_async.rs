@@ -73,8 +73,6 @@ fn read_after_process_exit() {
     command.arg(msg);
     let mut proc = PtyProcess::spawn(command).unwrap();
 
-    assert_eq!(WaitStatus::Exited(proc.pid(), 0), proc.wait().unwrap());
-
     block_on(async {
         let mut buf = Vec::new();
         proc.read_to_end(&mut buf).await.unwrap();
@@ -82,6 +80,9 @@ fn read_after_process_exit() {
 
         assert_eq!(0, proc.read(&mut buf).await.unwrap());
         assert_eq!(0, proc.read(&mut buf).await.unwrap());
+
+        // on macos this instruction must be at the as after parent checks child it's gone?
+        assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
     })
 }
 
@@ -274,13 +275,14 @@ fn try_read_after_process_exit() {
     command.arg("hello cat");
     let mut proc = PtyProcess::spawn(command).unwrap();
 
-    assert_eq!(WaitStatus::Exited(proc.pid(), 0), proc.wait().unwrap());
-
     block_on(async {
         let mut buf = vec![0; 128];
         assert_eq!(proc.try_read(&mut buf).await.unwrap(), Some(11));
         assert_eq!(&buf[..11], b"hello cat\r\n");
         assert_eq!(proc.try_read(&mut buf).await.unwrap(), Some(0));
+
+        // on macos this instruction must be at the as after parent checks child it's gone?
+        assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
     });
 }
 
