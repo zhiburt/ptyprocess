@@ -277,6 +277,8 @@ fn try_read_after_process_exit() {
     command.arg("hello cat");
     let mut proc = PtyProcess::spawn(command).unwrap();
 
+    thread::sleep(Duration::from_millis(300));
+
     block_on(async {
         let mut buf = vec![0; 128];
         assert_eq!(proc.try_read(&mut buf).await.unwrap(), Some(11));
