@@ -283,7 +283,7 @@ fn try_read_after_process_exit() {
         let mut buf = vec![0; 128];
         assert_eq!(proc.try_read(&mut buf).await.unwrap(), Some(11));
         assert_eq!(&buf[..11], b"hello cat\r\n");
-        assert_eq!(proc.try_read(&mut buf).await.unwrap(), Some(0));
+        assert_eq!(proc.try_read(&mut buf).await.unwrap(), None);
 
         // on macos this instruction must be at the as after parent checks child it's gone?
         assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
