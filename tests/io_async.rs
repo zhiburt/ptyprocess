@@ -286,8 +286,14 @@ fn try_read_after_process_exit() {
 
     block_on(async {
         let mut buf = vec![0; 128];
-        assert!(matches!(proc.try_read(&mut buf).await.unwrap(), Some(11) | None));
-        assert!(matches!(proc.try_read(&mut buf).await.unwrap(), Some(0) | None));
+        assert!(matches!(
+            proc.try_read(&mut buf).await.unwrap(),
+            Some(11) | None
+        ));
+        assert!(matches!(
+            proc.try_read(&mut buf).await.unwrap(),
+            Some(0) | None
+        ));
     });
 }
 
