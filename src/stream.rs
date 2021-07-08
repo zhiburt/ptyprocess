@@ -143,7 +143,7 @@ mod async_stream {
     use futures_lite::{io::BufReader, AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite};
     use std::{
         fs::File,
-        io,
+        io::{self, Read},
         pin::Pin,
         task::{Context, Poll},
     };
@@ -183,10 +183,11 @@ mod async_stream {
             //     None => Ok(None),
             // }
 
-            match futures_lite::future::poll_once(self.read(&mut buf)).await {
-                Some(Ok(n)) => Ok(Some(n)),
-                Some(Err(err)) => Err(err),
-                None => Ok(None),
+            // A fd already in a non-blocking mode
+            match self.reader.get_mut().as_mut().read(&mut buf) {
+                Ok(n) => Ok(Some(n)),
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
+                Err(err) => Err(err),
             }
         }
 
