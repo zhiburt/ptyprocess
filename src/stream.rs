@@ -147,6 +147,15 @@ mod async_stream {
         /// Otherwise it operates as general `std::io::Read` interface.
         pub async fn try_read(&mut self, mut buf: &mut [u8]) -> io::Result<Option<usize>> {
             // future::poll_once was testing but it doesn't work why?
+            // let a = future::poll_once(self.reader.read(buf)).await;
+            // match a {
+            //     Some(a) => match a {
+            //         Ok(n) => Ok(Some(n)),
+            //         Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
+            //         Err(err) => Err(err),
+            //     },
+            //     None => Ok(None),
+            // }
 
             let fd = self.inner.as_raw_fd();
             make_non_blocking(fd).map_err(nix_error_to_io)?;
