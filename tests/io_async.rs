@@ -3,28 +3,26 @@
 use futures_lite::{future::block_on, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 use ptyprocess::{ControlCode, PtyProcess, Signal, WaitStatus};
 use std::{
-    io::{BufRead, BufReader, LineWriter, Write},
+    io::{BufReader, LineWriter},
     process::Command,
     thread,
     time::Duration,
 };
 
 #[test]
+#[ignore = "A show case; That shouldn't be called"]
 fn cat() {
-    let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+    let process = PtyProcess::spawn(Command::new("cat")).unwrap();
+
+    // We are in async mode so a descriptor will be in a NON-BLOCKING mode,
+    // which may produce corresponding issues.
+    // So using get_pty_handle in such case may not worth it.
+    //
+    // It can be private for async feature if it will be considered an issue.
+
     let pty = process.get_pty_handle().unwrap();
-    let mut writer = LineWriter::new(&pty);
-    let mut reader = BufReader::new(&pty);
-
-    writer.write_all(b"hello cat\n").unwrap();
-    let mut buf = String::new();
-    reader.read_line(&mut buf).unwrap();
-    assert_eq!(buf, "hello cat\r\n");
-
-    drop(writer);
-    drop(reader);
-
-    assert_eq!(process.exit(true).unwrap(), true);
+    let _writer = LineWriter::new(&pty);
+    let _reader = BufReader::new(&pty);
 }
 
 #[test]

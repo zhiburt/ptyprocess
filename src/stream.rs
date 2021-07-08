@@ -5,13 +5,15 @@ pub type Stream = async_stream::AsyncStream;
 
 #[cfg(feature = "sync")]
 mod sync_stream {
-    use crate::util::{make_blocking, make_non_blocking, nix_error_to_io};
-
     use super::*;
+    use nix::{
+        fcntl::{fcntl, FcntlArg, OFlag},
+        Result,
+    };
     use std::{
         fs::File,
         io::{self, BufRead, BufReader, Read, Write},
-        os::unix::prelude::AsRawFd,
+        os::unix::prelude::{AsRawFd, RawFd},
     };
 
     #[derive(Debug)]
@@ -106,17 +108,42 @@ mod sync_stream {
             self.reader.consume(amt)
         }
     }
+
+    pub fn make_non_blocking(fd: RawFd) -> Result<()> {
+        _make_non_blocking(fd, true)
+    }
+
+    pub fn make_blocking(fd: RawFd) -> Result<()> {
+        _make_non_blocking(fd, false)
+    }
+
+    fn _make_non_blocking(fd: RawFd, blocking: bool) -> Result<()> {
+        let opt = fcntl(fd, FcntlArg::F_GETFL)?;
+        let mut opt = OFlag::from_bits_truncate(opt);
+        opt.set(OFlag::O_NONBLOCK, blocking);
+        fcntl(fd, FcntlArg::F_SETFL(opt))?;
+        Ok(())
+    }
+
+    pub fn nix_error_to_io(err: nix::Error) -> io::Error {
+        match err.as_errno() {
+            Some(code) => io::Error::from_raw_os_error(code as _),
+            None => io::Error::new(
+                io::ErrorKind::Other,
+                "Unexpected error type conversion from nix to io",
+            ),
+        }
+    }
 }
 
 #[cfg(feature = "async")]
 mod async_stream {
     use super::*;
-    use crate::util::{make_blocking, make_non_blocking, nix_error_to_io};
+    use async_io::Async;
     use futures_lite::{io::BufReader, AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite};
     use std::{
         fs::File,
         io,
-        os::unix::prelude::AsRawFd,
         pin::Pin,
         task::{Context, Poll},
     };
@@ -124,16 +151,15 @@ mod async_stream {
     #[pin_project::pin_project]
     #[derive(Debug)]
     pub struct AsyncStream {
-        inner: async_fs::File,
-        reader: BufReader<async_fs::File>,
+        inner: Async<File>,
+        reader: BufReader<Async<File>>,
     }
 
     impl AsyncStream {
         pub fn new(file: File) -> Self {
             let cloned = file.try_clone().unwrap();
-            let file = async_fs::File::from(file);
-            let file_cloned = async_fs::File::from(cloned);
-            let reader = BufReader::new(file_cloned);
+            let file = Async::new(file).unwrap();
+            let reader = BufReader::new(Async::new(cloned).unwrap());
 
             Self {
                 inner: file,
@@ -157,20 +183,11 @@ mod async_stream {
             //     None => Ok(None),
             // }
 
-            let fd = self.inner.as_raw_fd();
-            make_non_blocking(fd).map_err(nix_error_to_io)?;
-
-            let result = match self.read(&mut buf).await {
-                Ok(n) => Ok(Some(n)),
-                Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
-                Err(err) => Err(err),
-            };
-
-            // As file is DUPed changes in one descriptor affects all ones
-            // so we need to make blocking file after we finished.
-            make_blocking(fd).map_err(nix_error_to_io)?;
-
-            result
+            match futures_lite::future::poll_once(self.read(&mut buf)).await {
+                Some(Ok(n)) => Ok(Some(n)),
+                Some(Err(err)) => Err(err),
+                None => Ok(None),
+            }
         }
 
         /// Try to read a byte in a non-blocking mode.
@@ -200,15 +217,15 @@ mod async_stream {
             cx: &mut Context<'_>,
             buf: &[u8],
         ) -> Poll<io::Result<usize>> {
-            <async_fs::File as AsyncWrite>::poll_write(Pin::new(&mut self.inner), cx, buf)
+            <Async<File> as AsyncWrite>::poll_write(Pin::new(&mut self.inner), cx, buf)
         }
 
         fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-            <async_fs::File as AsyncWrite>::poll_flush(Pin::new(&mut self.inner), cx)
+            <Async<File> as AsyncWrite>::poll_flush(Pin::new(&mut self.inner), cx)
         }
 
         fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-            <async_fs::File as AsyncWrite>::poll_close(Pin::new(&mut self.inner), cx)
+            <Async<File> as AsyncWrite>::poll_close(Pin::new(&mut self.inner), cx)
         }
 
         fn poll_write_vectored(
@@ -216,7 +233,7 @@ mod async_stream {
             cx: &mut Context<'_>,
             bufs: &[io::IoSlice<'_>],
         ) -> Poll<io::Result<usize>> {
-            <async_fs::File as AsyncWrite>::poll_write_vectored(Pin::new(&mut self.inner), cx, bufs)
+            <Async<File> as AsyncWrite>::poll_write_vectored(Pin::new(&mut self.inner), cx, bufs)
         }
     }
 

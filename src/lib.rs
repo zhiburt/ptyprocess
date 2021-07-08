@@ -37,7 +37,6 @@
 mod control_code;
 mod process;
 mod stream;
-mod util;
 
 pub use crate::control_code::ControlCode;
 pub use crate::process::PtyProcess;
