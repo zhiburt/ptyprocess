@@ -73,6 +73,8 @@ fn read_after_process_exit() {
     command.arg(msg);
     let mut proc = PtyProcess::spawn(command).unwrap();
 
+    thread::sleep(Duration::from_millis(300));
+
     block_on(async {
         let mut buf = Vec::new();
         proc.read_to_end(&mut buf).await.unwrap();
