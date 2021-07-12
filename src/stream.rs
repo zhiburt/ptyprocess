@@ -186,6 +186,7 @@ mod async_stream {
             // A fd already in a non-blocking mode
             match self.reader.get_mut().as_mut().read(&mut buf) {
                 Ok(n) => Ok(Some(n)),
+                Err(ref err) if has_reached_end_of_sdtout(err) => Ok(Some(0)),
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
                 Err(err) => Err(err),
             }
