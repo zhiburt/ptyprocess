@@ -19,7 +19,12 @@ mod sync_stream {
     #[derive(Debug)]
     pub struct Stream {
         inner: File,
-        reader: BufReader<File>,
+        reader: BufReader<Reader>,
+    }
+
+    #[derive(Debug)]
+    struct Reader {
+        inner: File,
     }
 
     impl Stream {
@@ -27,7 +32,8 @@ mod sync_stream {
             let copy_file = file
                 .try_clone()
                 .expect("It's ok to clone fd as it will be just DUPed");
-            let reader = BufReader::new(copy_file);
+            let reader = BufReader::new(Reader { inner: copy_file });
+
             Self {
                 inner: file,
                 reader,
@@ -90,12 +96,18 @@ mod sync_stream {
         }
     }
 
-    impl Read for Stream {
+    impl Read for Reader {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            match self.reader.read(buf) {
+            match self.inner.read(buf) {
                 Err(ref err) if has_reached_end_of_sdtout(err) => Ok(0),
                 result => result,
             }
+        }
+    }
+
+    impl Read for Stream {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.reader.read(buf)
         }
     }
 
@@ -140,7 +152,7 @@ mod sync_stream {
 mod async_stream {
     use super::*;
     use async_io::Async;
-    use futures_lite::{io::BufReader, AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite};
+    use futures_lite::{io::BufReader, AsyncBufRead, AsyncRead, AsyncWrite};
     use std::{
         fs::File,
         io::{self, Read},
@@ -152,14 +164,21 @@ mod async_stream {
     #[derive(Debug)]
     pub struct AsyncStream {
         inner: Async<File>,
-        reader: BufReader<Async<File>>,
+        reader: BufReader<Reader>,
+    }
+
+    #[derive(Debug)]
+    struct Reader {
+        inner: Async<File>,
     }
 
     impl AsyncStream {
         pub fn new(file: File) -> Self {
             let cloned = file.try_clone().unwrap();
             let file = Async::new(file).unwrap();
-            let reader = BufReader::new(Async::new(cloned).unwrap());
+            let reader = BufReader::new(Reader {
+                inner: Async::new(cloned).unwrap(),
+            });
 
             Self {
                 inner: file,
@@ -184,7 +203,7 @@ mod async_stream {
             // }
 
             // A fd already in a non-blocking mode
-            match self.reader.get_mut().as_mut().read(&mut buf) {
+            match self.reader.get_mut().inner.as_mut().read(&mut buf) {
                 Ok(n) => Ok(Some(n)),
                 Err(ref err) if has_reached_end_of_sdtout(err) => Ok(Some(0)),
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
@@ -245,7 +264,17 @@ mod async_stream {
             cx: &mut Context<'_>,
             buf: &mut [u8],
         ) -> Poll<io::Result<usize>> {
-            let future = Pin::new(&mut self.reader).poll_read(cx, buf);
+            Pin::new(&mut self.reader).poll_read(cx, buf)
+        }
+    }
+
+    impl AsyncRead for Reader {
+        fn poll_read(
+            mut self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut [u8],
+        ) -> Poll<io::Result<usize>> {
+            let future = Pin::new(&mut self.inner).poll_read(cx, buf);
             match future {
                 Poll::Ready(Err(ref err)) if has_reached_end_of_sdtout(err) => Poll::Ready(Ok(0)),
                 _ => future,
