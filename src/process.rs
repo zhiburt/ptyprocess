@@ -27,9 +27,9 @@ const DEFAULT_TERM_ROWS: u16 = 24;
 const DEFAULT_VEOF_CHAR: u8 = 0x4; // ^D
 const DEFAULT_INTR_CHAR: u8 = 0x3; // ^C
 
-/// PtyProcess represents a controller for a spawned process.
+/// PtyProcess controls a spawned process and communication with this.
 ///
-/// The structure implements `std::io::Read` and `std::io::Write` which communicates with
+/// It implements [std::io::Read] and [std::io::Write] to communicate with
 /// a child.
 ///
 /// ```no_run,ignore
@@ -52,8 +52,7 @@ pub struct PtyProcess {
 }
 
 impl PtyProcess {
-    /// Spawns a child process and
-    /// creates a `PtyProcess` structure which controll communication with a child
+    /// Spawns a child process and create a [PtyProcess].
     ///
     /// ```no_run
     ///   # use std::process::Command;
@@ -147,6 +146,13 @@ impl PtyProcess {
 
     /// Returns a file representation of a PTY, which can be used to communicate with it.
     ///
+    /// # Safety
+    ///
+    /// Be carefull changing a descriptors inner state (e.g `fcntl`)
+    /// because it affects all structures which use it.
+    ///
+    /// # Example
+    ///
     /// ```no_run
     /// use ptyprocess::PtyProcess;
     /// use std::{process::Command, io::{BufReader, LineWriter}};
@@ -162,17 +168,17 @@ impl PtyProcess {
 
     /// Get window size of a terminal.
     ///
-    /// Default is size is 80x24.
+    /// Default size is 80x24.
     pub fn get_window_size(&self) -> Result<(u16, u16)> {
         get_term_size(self.master.as_raw_fd())
     }
 
-    /// Sets a terminal size
+    /// Sets a terminal size.
     pub fn set_window_size(&mut self, cols: u16, rows: u16) -> Result<()> {
         set_term_size(self.master.as_raw_fd(), cols, rows)
     }
 
-    /// Waits until a echo settings were setup
+    /// Waits until a echo settings is setup.
     pub fn wait_echo(&self, on: bool, timeout: Option<Duration>) -> Result<bool> {
         let now = time::Instant::now();
         while timeout.is_none() || now.elapsed() < timeout.unwrap() {
@@ -186,7 +192,7 @@ impl PtyProcess {
         Ok(false)
     }
 
-    /// Get_echo returns true if an echo setting is setup.
+    /// The function returns true if an echo setting is setup.
     pub fn get_echo(&self) -> Result<bool> {
         termios::tcgetattr(self.master.as_raw_fd())
             .map(|flags| flags.local_flags.contains(termios::LocalFlags::ECHO))
@@ -197,6 +203,7 @@ impl PtyProcess {
         set_echo(self.master.as_raw_fd(), on)
     }
 
+    /// Returns true if a underline `fd` connected with a TTY.
     pub fn isatty(&self) -> Result<bool> {
         isatty(self.master.as_raw_fd())
     }
@@ -218,7 +225,9 @@ impl PtyProcess {
         signal::kill(self.child_pid, signal)
     }
 
-    /// Signal is an alias to kill.
+    /// Signal is an alias to [PtyProcess::kill].
+    ///
+    /// [PtyProcess::kill]: struct.PtyProcess.html#method.kill
     pub fn signal(&mut self, signal: signal::Signal) -> Result<()> {
         self.kill(signal)
     }
@@ -227,9 +236,11 @@ impl PtyProcess {
     ///
     /// It returns a error if the child was DEAD or not exist
     /// at the time of a call.
-    /// So sometimes it's better to use a [`is_alive`] method
     ///
-    /// [`is_alive`]: struct.PtyProcess.html#method.is_alive
+    /// If you need to verify that a process is dead in non-blocking way you can use
+    /// [is_alive] method.
+    ///
+    /// [is_alive]: struct.PtyProcess.html#method.is_alive
     pub fn wait(&self) -> Result<WaitStatus> {
         waitpid(self.child_pid, None)
     }
@@ -237,7 +248,6 @@ impl PtyProcess {
     /// Checks if a process is still exists.
     ///
     /// It's a non blocking operation.
-    /// It's takes in mind errors which indicates that the child is gone.
     pub fn is_alive(&self) -> Result<bool> {
         match self.status() {
             Ok(status) if status == WaitStatus::StillAlive => Ok(true),
@@ -248,12 +258,17 @@ impl PtyProcess {
 
     /// Try to force a child to terminate.
     ///
-    /// It starts nicely with
-    /// SIGHUP, SIGCONT, SIGINT, SIGTERM.
-    /// If "force" is True then moves onto SIGKILL.
-    ///
     /// This returns true if the child was terminated. and returns false if the
     /// child could not be terminated.
+    ///
+    /// It makes 4 tries getting more thorough.
+    ///
+    /// 1. SIGHUP
+    /// 2. SIGCONT
+    /// 3. SIGINT
+    /// 4. SIGTERM
+    ///
+    /// If "force" is `true` then moves onto SIGKILL.
     pub fn exit(&mut self, force: bool) -> Result<bool> {
         if !self.is_alive()? {
             return Ok(true);
@@ -290,12 +305,14 @@ use std::io::Write;
 
 #[cfg(feature = "sync")]
 impl PtyProcess {
-    /// Send writes a string to a STDIN of a child.
+    /// Send text to child's `STDIN`.
+    ///
+    /// To write bytes you can use a [std::io::Write] operations instead.
     pub fn send<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
         self.stream.write_all(s.as_ref().as_bytes())
     }
 
-    /// Send writes a line to a STDIN of a child.
+    /// Send a line to child's `STDIN`.
     pub fn send_line<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
         #[cfg(windows)]
         const LINE_ENDING: &[u8] = b"\r\n";
@@ -336,12 +353,16 @@ impl PtyProcess {
         self.stream.write_all(&[code.into()])
     }
 
-    /// Send EOF indicator to a child process.
+    /// Send `EOF` indicator to a child process.
+    ///
+    /// Often `eof` char handled as it would be a CTRL-C.
     pub fn send_eof(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.eof_char])
     }
 
-    /// Send INTR indicator to a child process.
+    /// Send `INTR` indicator to a child process.
+    ///
+    /// Often `intr` char handled as it would be a CTRL-D.
     pub fn send_intr(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.intr_char])
     }
@@ -352,12 +373,14 @@ use futures_lite::AsyncWriteExt;
 
 #[cfg(feature = "async")]
 impl PtyProcess {
-    /// Send writes a string to a STDIN of a child.
+    /// Send text to child's `STDIN`.
+    ///
+    /// To write bytes you can use a [std::io::Write] operations instead.
     pub async fn send<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
         self.stream.write_all(s.as_ref().as_bytes()).await
     }
 
-    /// Send writes a line to a STDIN of a child.
+    /// Send a line to child's `STDIN`.
     pub async fn send_line<S: AsRef<str>>(&mut self, s: S) -> io::Result<()> {
         #[cfg(windows)]
         const LINE_ENDING: &[u8] = b"\r\n";
@@ -372,16 +395,37 @@ impl PtyProcess {
     }
 
     /// Send controll character to a child process.
-    pub async fn send_control(&mut self, code: ControlCode) -> io::Result<()> {
+    ///
+    /// You must be carefull passing a char or &str as an argument.
+    /// If you pass an unexpected controll you'll get a error.
+    /// So it may be better to use [ControlCode].
+    ///
+    /// ```no_run
+    /// use ptyprocess::{PtyProcess, ControlCode};
+    /// use std::process::Command;
+    ///
+    /// let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+    /// process.send_control(ControlCode::EndOfText); // sends CTRL^C
+    /// process.send_control('C'); // sends CTRL^C
+    /// process.send_control("^C"); // sends CTRL^C
+    /// ```
+    pub async fn send_control(&mut self, code: impl TryInto<ControlCode>) -> io::Result<()> {
+        let code = code.try_into().map_err(|_| {
+            io::Error::new(io::ErrorKind::Other, "Failed to parse a control character")
+        })?;
         self.stream.write_all(&[code.into()]).await
     }
 
-    /// Send EOF indicator to a child process.
+    /// Send `EOF` indicator to a child process.
+    ///
+    /// Often `eof` char handled as it would be a CTRL-C.
     pub async fn send_eof(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.eof_char]).await
     }
 
-    /// Send INTR indicator to a child process.
+    /// Send `INTR` indicator to a child process.
+    ///
+    /// Often `intr` char handled as it would be a CTRL-D.
     pub async fn send_intr(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.intr_char]).await
     }
