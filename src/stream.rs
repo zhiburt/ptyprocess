@@ -137,7 +137,7 @@ mod sync_stream {
         Ok(())
     }
 
-    pub fn nix_error_to_io(err: nix::Error) -> io::Error {
+    fn nix_error_to_io(err: nix::Error) -> io::Error {
         match err.as_errno() {
             Some(code) => io::Error::from_raw_os_error(code as _),
             None => io::Error::new(
