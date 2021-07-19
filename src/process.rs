@@ -13,6 +13,7 @@ use nix::unistd::{
 };
 use nix::{ioctl_write_ptr_bad, Error, Result};
 use signal::Signal::SIGKILL;
+use std::convert::TryInto;
 use std::fs::File;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::prelude::{AsRawFd, CommandExt, FromRawFd, RawFd};
@@ -314,7 +315,24 @@ impl PtyProcess {
     }
 
     /// Send controll character to a child process.
-    pub fn send_control(&mut self, code: ControlCode) -> io::Result<()> {
+    ///
+    /// You must be carefull passing a char or &str as an argument.
+    /// If you pass an unexpected controll you'll get a error.
+    /// So it may be better to use [ControlCode].
+    ///
+    /// ```no_run
+    /// use ptyprocess::{PtyProcess, ControlCode};
+    /// use std::process::Command;
+    ///
+    /// let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
+    /// process.send_control(ControlCode::EndOfText); // sends CTRL^C
+    /// process.send_control('C'); // sends CTRL^C
+    /// process.send_control("^C"); // sends CTRL^C
+    /// ```
+    pub fn send_control(&mut self, code: impl TryInto<ControlCode>) -> io::Result<()> {
+        let code = code.try_into().map_err(|_| {
+            io::Error::new(io::ErrorKind::Other, "Failed to parse a control character")
+        })?;
         self.stream.write_all(&[code.into()])
     }
 

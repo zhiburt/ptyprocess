@@ -1,3 +1,5 @@
+use std::convert::TryFrom;
+
 /// ControlCode represents the standard ASCII control codes [wiki]
 ///
 /// [wiki]: https://en.wikipedia.org/wiki/C0_and_C1_control_codes
@@ -156,6 +158,96 @@ impl From<ControlCode> for u8 {
             ControlCode::UnitSeparator => 31,
             ControlCode::Space => 32,
             ControlCode::Delete => 127,
+        }
+    }
+}
+
+impl TryFrom<char> for ControlCode {
+    type Error = ();
+
+    fn try_from(c: char) -> Result<ControlCode, ()> {
+        use ControlCode::*;
+        match c {
+            '@' => Ok(Null),
+            'A' | 'a' => Ok(StartOfHeading),
+            'B' | 'b' => Ok(StartOfText),
+            'C' | 'c' => Ok(EndOfText),
+            'D' | 'd' => Ok(EndOfTransmission),
+            'E' | 'e' => Ok(Enquiry),
+            'F' | 'f' => Ok(Acknowledge),
+            'G' | 'g' => Ok(Bell),
+            'H' | 'h' => Ok(Backspace),
+            'I' | 'i' => Ok(HorizontalTabulation),
+            'J' | 'j' => Ok(LineFeed),
+            'K' | 'k' => Ok(VerticalTabulation),
+            'L' | 'l' => Ok(FormFeed),
+            'M' | 'm' => Ok(CarriageReturn),
+            'N' | 'n' => Ok(ShiftOut),
+            'O' | 'o' => Ok(ShiftIn),
+            'P' | 'p' => Ok(DataLinkEscape),
+            'Q' | 'q' => Ok(DeviceControl1),
+            'R' | 'r' => Ok(DeviceControl2),
+            'S' | 's' => Ok(DeviceControl3),
+            'T' | 't' => Ok(DeviceControl4),
+            'U' | 'u' => Ok(NegativeAcknowledge),
+            'V' | 'v' => Ok(SynchronousIdle),
+            'W' | 'w' => Ok(EndOfTransmissionBlock),
+            'X' | 'x' => Ok(Cancel),
+            'Y' | 'y' => Ok(EndOfMedium),
+            'Z' | 'z' => Ok(Substitute),
+            '[' => Ok(Escape),
+            '\\' => Ok(FileSeparator),
+            ']' => Ok(GroupSeparator),
+            '^' => Ok(RecordSeparator),
+            '_' => Ok(UnitSeparator),
+            ' ' => Ok(Space),
+            '?' => Ok(Delete),
+            _ => Err(()),
+        }
+    }
+}
+
+impl TryFrom<&str> for ControlCode {
+    type Error = ();
+
+    fn try_from(c: &str) -> Result<ControlCode, ()> {
+        use ControlCode::*;
+        match c {
+            "^@" => Ok(Null),
+            "^A" => Ok(StartOfHeading),
+            "^B" => Ok(StartOfText),
+            "^C" => Ok(EndOfText),
+            "^D" => Ok(EndOfTransmission),
+            "^E" => Ok(Enquiry),
+            "^F" => Ok(Acknowledge),
+            "^G" => Ok(Bell),
+            "^H" => Ok(Backspace),
+            "^I" => Ok(HorizontalTabulation),
+            "^J" => Ok(LineFeed),
+            "^K" => Ok(VerticalTabulation),
+            "^L" => Ok(FormFeed),
+            "^M" => Ok(CarriageReturn),
+            "^N" => Ok(ShiftOut),
+            "^O" => Ok(ShiftIn),
+            "^P" => Ok(DataLinkEscape),
+            "^Q" => Ok(DeviceControl1),
+            "^R" => Ok(DeviceControl2),
+            "^S" => Ok(DeviceControl3),
+            "^T" => Ok(DeviceControl4),
+            "^U" => Ok(NegativeAcknowledge),
+            "^V" => Ok(SynchronousIdle),
+            "^W" => Ok(EndOfTransmissionBlock),
+            "^X" => Ok(Cancel),
+            "^Y" => Ok(EndOfMedium),
+            "^Z" => Ok(Substitute),
+            "^[" => Ok(Escape),
+            "^\\" => Ok(FileSeparator),
+            "^]" => Ok(GroupSeparator),
+            "^^" => Ok(RecordSeparator),
+            "^_" => Ok(UnitSeparator),
+            "^ " => Ok(Space),
+            "^?" => Ok(Delete),
+            _ => Err(()),
         }
     }
 }
