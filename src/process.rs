@@ -15,6 +15,7 @@ use nix::{ioctl_write_ptr_bad, Error, Result};
 use signal::Signal::SIGKILL;
 use std::convert::TryInto;
 use std::fs::File;
+use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::prelude::{AsRawFd, CommandExt, FromRawFd, RawFd};
 use std::process::{self, Command};
@@ -301,9 +302,6 @@ impl PtyProcess {
 }
 
 #[cfg(feature = "sync")]
-use std::io::Write;
-
-#[cfg(feature = "sync")]
 impl PtyProcess {
     /// Send text to child's `STDIN`.
     ///
@@ -365,6 +363,43 @@ impl PtyProcess {
     /// Often `intr` char handled as it would be a CTRL-D.
     pub fn send_intr(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.intr_char])
+    }
+
+    /// Interact gives control of the child process to the interactive user (the
+    /// human at the keyboard).
+    ///
+    /// Keystrokes are sent to the child process, and
+    /// the `stdout` and `stderr` output of the child process is printed.
+    ///
+    /// When the user types the `escape_character` this method will return control to a running process.
+    /// The escape_character will not be transmitted.
+    /// The default for escape_character is entered as `Ctrl-]`, the very same as BSD telnet.
+    ///
+    /// This simply echos the child `stdout` and `stderr` to the real `stdout` and
+    /// it echos the real `stdin` to the child `stdin`.
+    pub fn interact(&mut self) -> io::Result<()> {
+        // flush buffers
+        self.flush()?;
+
+        let stdin = unsafe { std::fs::File::from_raw_fd(std::io::stdin().as_raw_fd()) };
+        let mut stdin_stream = Stream::new(stdin);
+        let mut buf = [0; 512];
+        loop {
+            if let Some(n) = self.try_read(&mut buf)? {
+                std::io::stdout().write_all(&buf[..n])?;
+            }
+
+            if let Some(n) = stdin_stream.try_read(&mut buf)? {
+                for i in 0..n {
+                    if buf[i] == ControlCode::GroupSeparator as u8 {
+                        // Ctrl-]
+                        return Ok(());
+                    }
+
+                    self.write_all(&buf[i..i + 1])?;
+                }
+            }
+        }
     }
 }
 
@@ -428,6 +463,43 @@ impl PtyProcess {
     /// Often `intr` char handled as it would be a CTRL-D.
     pub async fn send_intr(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.intr_char]).await
+    }
+
+    /// Interact gives control of the child process to the interactive user (the
+    /// human at the keyboard).
+    ///
+    /// Keystrokes are sent to the child process, and
+    /// the `stdout` and `stderr` output of the child process is printed.
+    ///
+    /// When the user types the `escape_character` this method will return control to a running process.
+    /// The escape_character will not be transmitted.
+    /// The default for escape_character is entered as `Ctrl-]`, the very same as BSD telnet.
+    ///
+    /// This simply echos the child `stdout` and `stderr` to the real `stdout` and
+    /// it echos the real `stdin` to the child `stdin`.
+    pub async fn interact(&mut self) -> io::Result<()> {
+        // flush buffers
+        self.flush().await?;
+
+        let stdin = unsafe { std::fs::File::from_raw_fd(std::io::stdin().as_raw_fd()) };
+        let mut stdin_stream = Stream::new(stdin);
+        let mut buf = [0; 512];
+        loop {
+            if let Some(n) = self.try_read(&mut buf).await? {
+                std::io::stdout().write_all(&buf[..n])?;
+            }
+
+            if let Some(n) = stdin_stream.try_read(&mut buf).await? {
+                for i in 0..n {
+                    if buf[i] == ControlCode::GroupSeparator as u8 {
+                        // Ctrl-]
+                        return Ok(());
+                    }
+
+                    self.write_all(&buf[i..i + 1]).await?;
+                }
+            }
+        }
     }
 }
 

@@ -1,11 +1,15 @@
 /// To run an example run the following command
 /// `cargo run --example cat`.
-use ptyprocess::PtyProcess;
-use std::{fs::File, io, ops::DerefMut, process::Command};
 
 #[cfg(feature = "sync")]
 fn main() {
-    use std::io::BufRead;
+    use ptyprocess::PtyProcess;
+    use std::{
+        fs::File,
+        io::{self, BufRead},
+        ops::DerefMut,
+        process::Command,
+    };
 
     let mut process = PtyProcess::spawn(Command::new("cat")).expect("Error while spawning process");
 
