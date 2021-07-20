@@ -385,8 +385,13 @@ impl PtyProcess {
         let mut stdin_stream = Stream::new(stdin);
         let mut buf = [0; 512];
         loop {
+            if matches!(self.is_alive(), Ok(false)) {
+                return Ok(());
+            }
+
             if let Some(n) = self.try_read(&mut buf)? {
                 std::io::stdout().write_all(&buf[..n])?;
+                std::io::stdout().flush()?;
             }
 
             if let Some(n) = stdin_stream.try_read(&mut buf)? {
