@@ -249,8 +249,17 @@ impl PtyProcess {
     /// Checks if a process is still exists.
     ///
     /// It's a non blocking operation.
+    ///
+    /// Keep in mind that after calling this method process might be marked as DEAD by kernel,
+    /// because a check of its status.
+    /// Therefore second call to [Self::status] or [Self::is_alive] might return a different status.
     pub fn is_alive(&self) -> Result<bool> {
-        is_alive(self.status())
+        let status = self.status();
+        match status {
+            Ok(status) if status == WaitStatus::StillAlive => Ok(true),
+            Ok(_) | Err(Error::Sys(Errno::ECHILD)) | Err(Error::Sys(Errno::ESRCH)) => Ok(false),
+            Err(err) => Err(err),
+        }
     }
 
     /// Try to force a child to terminate.
@@ -444,14 +453,6 @@ impl Deref for PtyProcess {
 impl DerefMut for PtyProcess {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.stream
-    }
-}
-
-fn is_alive(status: Result<WaitStatus>) -> Result<bool> {
-    match status {
-        Ok(status) if status == WaitStatus::StillAlive => Ok(true),
-        Ok(_) | Err(Error::Sys(Errno::ECHILD)) | Err(Error::Sys(Errno::ESRCH)) => Ok(false),
-        Err(err) => Err(err),
     }
 }
 
