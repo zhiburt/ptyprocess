@@ -10,9 +10,9 @@ fn main() {
     println!("Now you're in interacting mode");
     println!("To return control back to main type CTRL-]");
 
-    process.interact().expect("Failed to start interact");
+    let status = process.interact().expect("Failed to start interact");
 
-    println!("Quiting");
+    println!("Status {:?}", status);
 }
 
 #[cfg(feature = "async")]

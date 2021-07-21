@@ -250,11 +250,7 @@ impl PtyProcess {
     ///
     /// It's a non blocking operation.
     pub fn is_alive(&self) -> Result<bool> {
-        match self.status() {
-            Ok(status) if status == WaitStatus::StillAlive => Ok(true),
-            Ok(_) | Err(Error::Sys(Errno::ECHILD)) | Err(Error::Sys(Errno::ESRCH)) => Ok(false),
-            Err(err) => Err(err),
-        }
+        is_alive(self.status())
     }
 
     /// Try to force a child to terminate.
@@ -368,6 +364,10 @@ impl PtyProcess {
     /// Interact gives control of the child process to the interactive user (the
     /// human at the keyboard).
     ///
+    /// Returns a status of a process ater interactions.
+    /// Why it's crusial to return a status is after check of is_alive the actuall
+    /// status might be gone.
+    ///
     /// Keystrokes are sent to the child process, and
     /// the `stdout` and `stderr` output of the child process is printed.
     ///
@@ -377,7 +377,7 @@ impl PtyProcess {
     ///
     /// This simply echos the child `stdout` and `stderr` to the real `stdout` and
     /// it echos the real `stdin` to the child `stdin`.
-    pub fn interact(&mut self) -> io::Result<()> {
+    pub fn interact(&mut self) -> io::Result<WaitStatus> {
         // flush buffers
         self.flush()?;
 
@@ -385,8 +385,9 @@ impl PtyProcess {
         let mut stdin_stream = Stream::new(stdin);
         let mut buf = [0; 512];
         loop {
-            if matches!(self.is_alive(), Ok(false)) {
-                return Ok(());
+            let status = self.status();
+            if matches!(is_alive(status), Ok(false)) {
+                return status.map_err(nix_error_to_io);
             }
 
             if let Some(n) = self.try_read(&mut buf)? {
@@ -396,9 +397,11 @@ impl PtyProcess {
 
             if let Some(n) = stdin_stream.try_read(&mut buf)? {
                 for i in 0..n {
-                    if buf[i] == ControlCode::GroupSeparator as u8 {
-                        // Ctrl-]
-                        return Ok(());
+                    // Ctrl-]
+                    if buf[i] == ControlCode::GroupSeparator.into() {
+                        // it might be too much to call a `status()` here,
+                        // do it just in case.
+                        return self.status().map_err(nix_error_to_io);
                     }
 
                     self.write_all(&buf[i..i + 1])?;
@@ -473,6 +476,10 @@ impl PtyProcess {
     /// Interact gives control of the child process to the interactive user (the
     /// human at the keyboard).
     ///
+    /// Returns a status of a process ater interactions.
+    /// Why it's crusial to return a status is after check of is_alive the actuall
+    /// status might be gone.
+    ///
     /// Keystrokes are sent to the child process, and
     /// the `stdout` and `stderr` output of the child process is printed.
     ///
@@ -482,7 +489,7 @@ impl PtyProcess {
     ///
     /// This simply echos the child `stdout` and `stderr` to the real `stdout` and
     /// it echos the real `stdin` to the child `stdin`.
-    pub async fn interact(&mut self) -> io::Result<()> {
+    pub async fn interact(&mut self) -> io::Result<WaitStatus> {
         // flush buffers
         self.flush().await?;
 
@@ -490,15 +497,23 @@ impl PtyProcess {
         let mut stdin_stream = Stream::new(stdin);
         let mut buf = [0; 512];
         loop {
+            let status = self.status();
+            if matches!(is_alive(status), Ok(false)) {
+                return status.map_err(nix_error_to_io);
+            }
+
             if let Some(n) = self.try_read(&mut buf).await? {
                 std::io::stdout().write_all(&buf[..n])?;
+                std::io::stdout().flush()?;
             }
 
             if let Some(n) = stdin_stream.try_read(&mut buf).await? {
                 for i in 0..n {
-                    if buf[i] == ControlCode::GroupSeparator as u8 {
-                        // Ctrl-]
-                        return Ok(());
+                    // Ctrl-]
+                    if buf[i] == ControlCode::GroupSeparator.into() {
+                        // it might be too much to call a `status()` here,
+                        // do it just in case.
+                        return self.status().map_err(nix_error_to_io);
                     }
 
                     self.write_all(&buf[i..i + 1]).await?;
@@ -527,6 +542,14 @@ impl Deref for PtyProcess {
 impl DerefMut for PtyProcess {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.stream
+    }
+}
+
+fn is_alive(status: Result<WaitStatus>) -> Result<bool> {
+    match status {
+        Ok(status) if status == WaitStatus::StillAlive => Ok(true),
+        Ok(_) | Err(Error::Sys(Errno::ECHILD)) | Err(Error::Sys(Errno::ESRCH)) => Ok(false),
+        Err(err) => Err(err),
     }
 }
 
@@ -729,6 +752,16 @@ fn make_controlling_tty(child_name: &str) -> Result<()> {
     close(fd)?;
 
     Ok(())
+}
+
+fn nix_error_to_io(err: nix::Error) -> io::Error {
+    match err.as_errno() {
+        Some(code) => io::Error::from_raw_os_error(code as _),
+        None => io::Error::new(
+            io::ErrorKind::Other,
+            "Unexpected error type conversion from nix to io",
+        ),
+    }
 }
 
 #[cfg(test)]
