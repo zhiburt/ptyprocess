@@ -50,7 +50,7 @@
 
 mod control_code;
 mod process;
-mod stream;
+pub mod stream;
 
 pub use crate::control_code::ControlCode;
 pub use crate::process::PtyProcess;
