@@ -303,3 +303,30 @@ fn read_until() {
 
     assert_eq!(process.exit(true).unwrap(), true);
 }
+
+#[test]
+fn continues_try_reads() {
+    use ptyprocess::PtyProcess;
+    use std::process::Command;
+
+    let mut cmd = Command::new("python3");
+    cmd.args(vec![
+        "-c",
+        "import time;\
+        print('Start Sleep');\
+        time.sleep(0.1);\
+        print('End of Sleep');\
+        yn=input('input');",
+    ]);
+
+    let mut process = PtyProcess::spawn(cmd).unwrap();
+
+    let mut buf = [0; 128];
+    loop {
+        if let Some(n) = process.try_read(&mut buf).unwrap() {
+            if String::from_utf8_lossy(&buf[..n]).contains("input") {
+                break;
+            }
+        }
+    }
+}
