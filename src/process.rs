@@ -360,55 +360,6 @@ impl PtyProcess {
     pub fn send_intr(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.intr_char])
     }
-
-    /// Interact gives control of the child process to the interactive user (the
-    /// human at the keyboard).
-    ///
-    /// Returns a status of a process ater interactions.
-    /// Why it's crusial to return a status is after check of is_alive the actuall
-    /// status might be gone.
-    ///
-    /// Keystrokes are sent to the child process, and
-    /// the `stdout` and `stderr` output of the child process is printed.
-    ///
-    /// When the user types the `escape_character` this method will return control to a running process.
-    /// The escape_character will not be transmitted.
-    /// The default for escape_character is entered as `Ctrl-]`, the very same as BSD telnet.
-    ///
-    /// This simply echos the child `stdout` and `stderr` to the real `stdout` and
-    /// it echos the real `stdin` to the child `stdin`.
-    pub fn interact(&mut self) -> io::Result<WaitStatus> {
-        // flush buffers
-        self.flush()?;
-
-        let stdin = unsafe { std::fs::File::from_raw_fd(std::io::stdin().as_raw_fd()) };
-        let mut stdin_stream = Stream::new(stdin);
-        let mut buf = [0; 512];
-        loop {
-            let status = self.status();
-            if matches!(is_alive(status), Ok(false)) {
-                return status.map_err(nix_error_to_io);
-            }
-
-            if let Some(n) = self.try_read(&mut buf)? {
-                std::io::stdout().write_all(&buf[..n])?;
-                std::io::stdout().flush()?;
-            }
-
-            if let Some(n) = stdin_stream.try_read(&mut buf)? {
-                for i in 0..n {
-                    // Ctrl-]
-                    if buf[i] == ControlCode::GroupSeparator.into() {
-                        // it might be too much to call a `status()` here,
-                        // do it just in case.
-                        return self.status().map_err(nix_error_to_io);
-                    }
-
-                    self.write_all(&buf[i..i + 1])?;
-                }
-            }
-        }
-    }
 }
 
 #[cfg(feature = "async")]
@@ -471,55 +422,6 @@ impl PtyProcess {
     /// Often `intr` char handled as it would be a CTRL-D.
     pub async fn send_intr(&mut self) -> io::Result<()> {
         self.stream.write_all(&[self.intr_char]).await
-    }
-
-    /// Interact gives control of the child process to the interactive user (the
-    /// human at the keyboard).
-    ///
-    /// Returns a status of a process ater interactions.
-    /// Why it's crusial to return a status is after check of is_alive the actuall
-    /// status might be gone.
-    ///
-    /// Keystrokes are sent to the child process, and
-    /// the `stdout` and `stderr` output of the child process is printed.
-    ///
-    /// When the user types the `escape_character` this method will return control to a running process.
-    /// The escape_character will not be transmitted.
-    /// The default for escape_character is entered as `Ctrl-]`, the very same as BSD telnet.
-    ///
-    /// This simply echos the child `stdout` and `stderr` to the real `stdout` and
-    /// it echos the real `stdin` to the child `stdin`.
-    pub async fn interact(&mut self) -> io::Result<WaitStatus> {
-        // flush buffers
-        self.flush().await?;
-
-        let stdin = unsafe { std::fs::File::from_raw_fd(std::io::stdin().as_raw_fd()) };
-        let mut stdin_stream = Stream::new(stdin);
-        let mut buf = [0; 512];
-        loop {
-            let status = self.status();
-            if matches!(is_alive(status), Ok(false)) {
-                return status.map_err(nix_error_to_io);
-            }
-
-            if let Some(n) = self.try_read(&mut buf).await? {
-                std::io::stdout().write_all(&buf[..n])?;
-                std::io::stdout().flush()?;
-            }
-
-            if let Some(n) = stdin_stream.try_read(&mut buf).await? {
-                for i in 0..n {
-                    // Ctrl-]
-                    if buf[i] == ControlCode::GroupSeparator.into() {
-                        // it might be too much to call a `status()` here,
-                        // do it just in case.
-                        return self.status().map_err(nix_error_to_io);
-                    }
-
-                    self.write_all(&buf[i..i + 1]).await?;
-                }
-            }
-        }
     }
 }
 
@@ -752,16 +654,6 @@ fn make_controlling_tty(child_name: &str) -> Result<()> {
     close(fd)?;
 
     Ok(())
-}
-
-fn nix_error_to_io(err: nix::Error) -> io::Error {
-    match err.as_errno() {
-        Some(code) => io::Error::from_raw_os_error(code as _),
-        None => io::Error::new(
-            io::ErrorKind::Other,
-            "Unexpected error type conversion from nix to io",
-        ),
-    }
 }
 
 #[cfg(test)]
