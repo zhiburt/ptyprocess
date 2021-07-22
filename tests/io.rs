@@ -306,9 +306,6 @@ fn read_until() {
 
 #[test]
 fn continues_try_reads() {
-    use ptyprocess::PtyProcess;
-    use std::process::Command;
-
     let mut cmd = Command::new("python3");
     cmd.args(vec![
         "-c",
@@ -329,4 +326,16 @@ fn continues_try_reads() {
             }
         }
     }
+}
+
+#[test]
+fn end_of_interact() {
+    let mut p = PtyProcess::spawn(Command::new("ls")).unwrap();
+    let status = p.interact().unwrap();
+    assert!(matches!(status, WaitStatus::Exited(_, 0)));
+
+    // check that second spawn works
+    let mut p = PtyProcess::spawn(Command::new("ls")).unwrap();
+    let status = p.interact().unwrap();
+    assert!(matches!(status, WaitStatus::Exited(_, 0)));
 }
