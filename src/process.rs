@@ -506,7 +506,7 @@ impl PtyProcess {
         let stdin_copy_fd = dup(0).map_err(nix_error_to_io)?;
         let stdin = unsafe { std::fs::File::from_raw_fd(stdin_copy_fd) };
         let mut stdin_stream = Stream::new(stdin);
-        
+
         let mut buf = [0; 512];
         loop {
             let status = self.status();
