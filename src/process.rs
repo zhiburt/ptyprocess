@@ -400,13 +400,14 @@ impl PtyProcess {
         #[cfg(not(target_os = "macos"))]
         let isatty_in = isatty(STDIN_FILENO).map_err(nix_error_to_io)?;
         // As CI showed on macos sometimes isatty causes EOPNOTSUPP errno
-        // I have no idea why so we are ignoring error on macos and consider it false
+        // I have no idea why so we are ignoring error on macos and consider it true.
+        // I tried to make false as a default which is goes well with my logic, but CI says no...
         //
         // https://github.com/zhiburt/ptyprocess/runs/3151467140?check_suite_focus=true
         //
-        // todo: verify why error happens.
+        // todo: verify why this error happens.
         #[cfg(target_os = "macos")]
-        let isatty_in = isatty(STDIN_FILENO).unwrap_or(false);
+        let isatty_in = isatty(STDIN_FILENO).unwrap_or(true);
 
         // tcgetattr issues error if a provided fd is not a tty,
         // so we run set_raw only when it's a tty.
