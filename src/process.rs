@@ -392,11 +392,13 @@ impl PtyProcess {
         // flush buffers
         self.flush()?;
 
-        let origin_pty_echo = self.get_echo().map_err(nix_error_to_io)?;
-        self.set_echo(true).map_err(nix_error_to_io)?;
+        let origin_pty_echo = self.get_echo().map_err(nix_error_to_io).unwrap();
+        self.set_echo(true).map_err(nix_error_to_io).unwrap();
 
-        let origin_stdin_flags = termios::tcgetattr(STDIN_FILENO).map_err(nix_error_to_io)?;
-        set_raw(STDIN_FILENO).map_err(nix_error_to_io)?;
+        let origin_stdin_flags = termios::tcgetattr(STDIN_FILENO)
+            .map_err(nix_error_to_io)
+            .unwrap();
+        set_raw(STDIN_FILENO).map_err(nix_error_to_io).unwrap();
 
         let result = self._interact();
 
@@ -405,9 +407,12 @@ impl PtyProcess {
             termios::SetArg::TCSAFLUSH,
             &origin_stdin_flags,
         )
-        .map_err(nix_error_to_io)?;
+        .map_err(nix_error_to_io)
+        .unwrap();
 
-        self.set_echo(origin_pty_echo).map_err(nix_error_to_io)?;
+        self.set_echo(origin_pty_echo)
+            .map_err(nix_error_to_io)
+            .unwrap();
 
         result
     }
@@ -419,7 +424,7 @@ impl PtyProcess {
         //
         // Why we don't use a `std::fs::File::try_clone` with a 0 fd?
         // Because for some reason it actually doesn't make the same things as DUP does,
-        // even a research showed that it should.
+        // eventhough a research showed that it should.
         // https://github.com/zhiburt/expectrl/issues/7#issuecomment-884787229
         let stdin_copy_fd = dup(0).map_err(nix_error_to_io)?;
 
