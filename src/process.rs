@@ -392,13 +392,11 @@ impl PtyProcess {
         // flush buffers
         self.flush()?;
 
-        let origin_pty_echo = self.get_echo().map_err(nix_error_to_io).unwrap();
-        self.set_echo(true).map_err(nix_error_to_io).unwrap();
+        let origin_pty_echo = self.get_echo().map_err(nix_error_to_io)?;
+        self.set_echo(true).map_err(nix_error_to_io)?;
 
-        let origin_stdin_flags = termios::tcgetattr(STDIN_FILENO)
-            .map_err(nix_error_to_io)
-            .unwrap();
-        set_raw(STDIN_FILENO).map_err(nix_error_to_io).unwrap();
+        let origin_stdin_flags = termios::tcgetattr(STDIN_FILENO).map_err(nix_error_to_io)?;
+        set_raw(STDIN_FILENO).map_err(nix_error_to_io)?;
 
         let result = self._interact();
 
@@ -407,12 +405,9 @@ impl PtyProcess {
             termios::SetArg::TCSAFLUSH,
             &origin_stdin_flags,
         )
-        .map_err(nix_error_to_io)
-        .unwrap();
+        .map_err(nix_error_to_io)?;
 
-        self.set_echo(origin_pty_echo)
-            .map_err(nix_error_to_io)
-            .unwrap();
+        self.set_echo(origin_pty_echo).map_err(nix_error_to_io)?;
 
         result
     }
