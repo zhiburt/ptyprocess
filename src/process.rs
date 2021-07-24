@@ -392,7 +392,37 @@ impl PtyProcess {
         // flush buffers
         self.flush()?;
 
+        let origin_pty_echo = self.get_echo().map_err(nix_error_to_io)?;
+        self.set_echo(true).map_err(nix_error_to_io)?;
+
+        let origin_stdin_flags = termios::tcgetattr(STDIN_FILENO).map_err(nix_error_to_io)?;
+        set_raw(STDIN_FILENO).map_err(nix_error_to_io)?;
+
+        let result = self._interact();
+
+        termios::tcsetattr(
+            STDIN_FILENO,
+            termios::SetArg::TCSAFLUSH,
+            &origin_stdin_flags,
+        )
+        .map_err(nix_error_to_io)?;
+
+        self.set_echo(origin_pty_echo).map_err(nix_error_to_io)?;
+
+        result
+    }
+
+    fn _interact(&mut self) -> io::Result<WaitStatus> {
+        // it's crusial to make a DUP call here.
+        // If we don't actual stdin will be closed,
+        // And any interaction with it may cause errors.
+        //
+        // Why we don't use a `std::fs::File::try_clone` with a 0 fd?
+        // Because for some reason it actually doesn't make the same things as DUP does,
+        // even a research showed that it should.
+        // https://github.com/zhiburt/expectrl/issues/7#issuecomment-884787229
         let stdin_copy_fd = dup(0).map_err(nix_error_to_io)?;
+
         let stdin = unsafe { std::fs::File::from_raw_fd(stdin_copy_fd) };
         let mut stdin_stream = Stream::new(stdin);
 
@@ -403,6 +433,10 @@ impl PtyProcess {
                 return status.map_err(nix_error_to_io);
             }
 
+            // it prints STDIN input as well,
+            // by echoing it.
+            //
+            // the setting must be set before calling the function.
             if let Some(n) = self.try_read(&mut buf)? {
                 std::io::stdout().write_all(&buf[..n])?;
                 std::io::stdout().flush()?;
@@ -503,7 +537,37 @@ impl PtyProcess {
         // flush buffers
         self.flush().await?;
 
+        let origin_pty_echo = self.get_echo().map_err(nix_error_to_io)?;
+        self.set_echo(true).map_err(nix_error_to_io)?;
+
+        let origin_stdin_flags = termios::tcgetattr(STDIN_FILENO).map_err(nix_error_to_io)?;
+        set_raw(STDIN_FILENO).map_err(nix_error_to_io)?;
+
+        let result = self._interact().await;
+
+        termios::tcsetattr(
+            STDIN_FILENO,
+            termios::SetArg::TCSAFLUSH,
+            &origin_stdin_flags,
+        )
+        .map_err(nix_error_to_io)?;
+
+        self.set_echo(origin_pty_echo).map_err(nix_error_to_io)?;
+
+        result
+    }
+
+    async fn _interact(&mut self) -> io::Result<WaitStatus> {
+        // it's crusial to make a DUP call here.
+        // If we don't actual stdin will be closed,
+        // And any interaction with it may cause errors.
+        //
+        // Why we don't use a `std::fs::File::try_clone` with a 0 fd?
+        // Because for some reason it actually doesn't make the same things as DUP does,
+        // even a research showed that it should.
+        // https://github.com/zhiburt/expectrl/issues/7#issuecomment-884787229
         let stdin_copy_fd = dup(0).map_err(nix_error_to_io)?;
+
         let stdin = unsafe { std::fs::File::from_raw_fd(stdin_copy_fd) };
         let mut stdin_stream = Stream::new(stdin);
 
@@ -514,6 +578,10 @@ impl PtyProcess {
                 return status.map_err(nix_error_to_io);
             }
 
+            // it prints STDIN input as well,
+            // by echoing it.
+            //
+            // the setting must be set before calling the function.
             if let Some(n) = self.try_read(&mut buf).await? {
                 std::io::stdout().write_all(&buf[..n])?;
                 std::io::stdout().flush()?;
@@ -698,7 +766,41 @@ fn set_echo(fd: RawFd, on: bool) -> Result<()> {
         false => flags.local_flags &= !termios::LocalFlags::ECHO,
     }
 
-    termios::tcsetattr(STDIN_FILENO, termios::SetArg::TCSANOW, &flags)?;
+    termios::tcsetattr(fd, termios::SetArg::TCSANOW, &flags)?;
+    Ok(())
+}
+
+fn set_raw(fd: RawFd) -> Result<()> {
+    let mut flags = termios::tcgetattr(fd)?;
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        termios::cfmakeraw(&mut flags);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // implementation is taken from https://github.com/python/cpython/blob/3.9/Lib/tty.py
+        use nix::libc::{VMIN, VTIME};
+        use termios::ControlFlags;
+        use termios::InputFlags;
+        use termios::LocalFlags;
+        use termios::OutputFlags;
+
+        flags.input_flags &= !(InputFlags::BRKINT
+            | InputFlags::ICRNL
+            | InputFlags::INPCK
+            | InputFlags::ISTRIP
+            | InputFlags::IXON);
+        flags.output_flags &= !OutputFlags::OPOST;
+        flags.control_flags &= !(ControlFlags::CSIZE | ControlFlags::PARENB);
+        flags.control_flags |= ControlFlags::CS8;
+        flags.local_flags &=
+            !(LocalFlags::ECHO | LocalFlags::ICANON | LocalFlags::IEXTEN | LocalFlags::ISIG);
+        flags.control_chars[VMIN] = 1;
+        flags.control_chars[VTIME] = 0;
+    }
+
+    termios::tcsetattr(fd, termios::SetArg::TCSAFLUSH, &flags)?;
     Ok(())
 }
 
