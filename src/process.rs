@@ -400,14 +400,14 @@ impl PtyProcess {
         #[cfg(not(target_os = "macos"))]
         let isatty_in = isatty(STDIN_FILENO).map_err(nix_error_to_io)?;
         // As CI showed on macos sometimes isatty causes EOPNOTSUPP errno
-        // I have no idea why so we are ignoring error on macos and consider it true.
-        // I tried to make false as a default which is goes well with my logic, but CI says no...
+        // I have no idea why - so we are ignoring error on macos and consider it false.
+        // But false causes an endless waiting...
         //
         // https://github.com/zhiburt/ptyprocess/runs/3151467140?check_suite_focus=true
         //
         // todo: verify why this error happens.
         #[cfg(target_os = "macos")]
-        let isatty_in = isatty(STDIN_FILENO).unwrap_or(true);
+        let isatty_in = isatty(STDIN_FILENO).unwrap_or(false);
 
         // tcgetattr issues error if a provided fd is not a tty,
         // so we run set_raw only when it's a tty.
@@ -447,7 +447,7 @@ impl PtyProcess {
         // Because for some reason it actually doesn't make the same things as DUP does,
         // eventhough a research showed that it should.
         // https://github.com/zhiburt/expectrl/issues/7#issuecomment-884787229
-        let stdin_copy_fd = dup(0).map_err(nix_error_to_io)?;
+        let stdin_copy_fd = dup(STDIN_FILENO).map_err(nix_error_to_io)?;
 
         let stdin = unsafe { std::fs::File::from_raw_fd(stdin_copy_fd) };
         let mut stdin_stream = Stream::new(stdin);
