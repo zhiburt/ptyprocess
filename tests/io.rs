@@ -329,7 +329,7 @@ fn continues_try_reads() {
 }
 
 #[test]
-// #[ignore = "for some reason it fails on CI for ubuntu; on macos its OK"]
+#[cfg(not(target_os = "macos"))]
 fn end_of_interact() {
     let mut p = PtyProcess::spawn(Command::new("ls")).unwrap();
     let status = p.interact().unwrap();
@@ -342,7 +342,7 @@ fn end_of_interact() {
 }
 
 #[test]
-// #[ignore = "for some reason it fails on CI for ubuntu; on macos its OK"]
+#[cfg(not(target_os = "macos"))]
 fn spawn_after_interact() {
     let mut p = PtyProcess::spawn(Command::new("ls")).unwrap();
     let status = p.interact().unwrap();
