@@ -335,7 +335,8 @@ fn end_of_interact() {
     assert!(matches!(status, WaitStatus::Exited(_, 0)));
 
     // try to fix CI
-    thread::sleep(Duration::from_millis(1500));
+    thread::sleep(Duration::from_millis(500));
+    drop(p);
 
     // check that second spawn works
     let mut p = PtyProcess::spawn(Command::new("ls")).unwrap();
