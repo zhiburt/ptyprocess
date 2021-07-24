@@ -397,7 +397,16 @@ impl PtyProcess {
 
         // verify: possible controlling fd can be stdout and stderr as well?
         // https://stackoverflow.com/questions/35873843/when-setting-terminal-attributes-via-tcsetattrfd-can-fd-be-either-stdout
+        #[cfg(not(target_os = "macos"))]
         let isatty_in = isatty(STDIN_FILENO).unwrap();
+        // As CI showed on macos sometimes isatty causes EOPNOTSUPP errno
+        // I have no idea why so we are ignoring error on macos and consider it false
+        //
+        // https://github.com/zhiburt/ptyprocess/runs/3151467140?check_suite_focus=true
+        //
+        // todo: verify why error happens.
+        #[cfg(target_os = "macos")]
+        let isatty_in = isatty(STDIN_FILENO).unwrap_or(false);
 
         // tcgetattr issues error if a provided fd is not a tty,
         // so we run set_raw only when it's a tty.
@@ -798,7 +807,7 @@ fn set_echo(fd: RawFd, on: bool) -> Result<()> {
         false => flags.local_flags &= !termios::LocalFlags::ECHO,
     }
 
-    termios::tcsetattr(fd, termios::SetArg::TCSAFLUSH, &flags)?;
+    termios::tcsetattr(fd, termios::SetArg::TCSANOW, &flags)?;
     Ok(())
 }
 
