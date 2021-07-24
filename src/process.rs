@@ -798,7 +798,7 @@ fn set_echo(fd: RawFd, on: bool) -> Result<()> {
         false => flags.local_flags &= !termios::LocalFlags::ECHO,
     }
 
-    termios::tcsetattr(fd, termios::SetArg::TCSANOW, &flags)?;
+    termios::tcsetattr(fd, termios::SetArg::TCSAFLUSH, &flags)?;
     Ok(())
 }
 
