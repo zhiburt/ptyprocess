@@ -397,15 +397,15 @@ impl PtyProcess {
 
         // verify: possible controlling fd can be stdout and stderr as well?
         // https://stackoverflow.com/questions/35873843/when-setting-terminal-attributes-via-tcsetattrfd-can-fd-be-either-stdout
-        let isatty_in = isatty(STDIN_FILENO).map_err(nix_error_to_io).unwrap();
+        let isatty_in = isatty(STDIN_FILENO).unwrap();
 
         // tcgetattr issues error if a provided fd is not a tty,
         // so we run set_raw only when it's a tty.
         //
         // todo: simplify.
         if isatty_in {
-            let origin_stdin_flags = termios::tcgetattr(STDIN_FILENO).map_err(nix_error_to_io).unwrap();
-            set_raw(STDIN_FILENO).map_err(nix_error_to_io).unwrap();
+            let origin_stdin_flags = termios::tcgetattr(STDIN_FILENO).map_err(nix_error_to_io)?;
+            set_raw(STDIN_FILENO).map_err(nix_error_to_io)?;
 
             let result = self._interact();
 
@@ -414,9 +414,9 @@ impl PtyProcess {
                 termios::SetArg::TCSAFLUSH,
                 &origin_stdin_flags,
             )
-            .map_err(nix_error_to_io).unwrap();
+            .map_err(nix_error_to_io)?;
 
-            self.set_echo(origin_pty_echo).map_err(nix_error_to_io).unwrap();
+            self.set_echo(origin_pty_echo).map_err(nix_error_to_io)?;
 
             result
         } else {
