@@ -402,7 +402,7 @@ impl PtyProcess {
 
         termios::tcsetattr(
             STDIN_FILENO,
-            termios::SetArg::TCSAFLUSH,
+            termios::SetArg::TCSANOW,
             &origin_stdin_flags,
         )
         .map_err(nix_error_to_io)?;
@@ -800,7 +800,7 @@ fn set_raw(fd: RawFd) -> Result<()> {
         flags.control_chars[VTIME] = 0;
     }
 
-    termios::tcsetattr(fd, termios::SetArg::TCSAFLUSH, &flags)?;
+    termios::tcsetattr(fd, termios::SetArg::TCSANOW, &flags)?;
     Ok(())
 }
 
