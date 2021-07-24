@@ -340,3 +340,13 @@ fn end_of_interact() {
     let status = p.interact().unwrap();
     assert!(matches!(status, WaitStatus::Exited(_, 0)));
 }
+
+#[test]
+fn spawn_after_interact() {
+    let mut p = PtyProcess::spawn(Command::new("ls")).unwrap();
+    let status = p.interact().unwrap();
+    assert!(matches!(status, WaitStatus::Exited(_, 0)));
+
+    let p = PtyProcess::spawn(Command::new("ls")).unwrap();
+    assert!(matches!(p.wait().unwrap(), WaitStatus::Exited(_, 0)));
+}
