@@ -564,7 +564,7 @@ impl PtyProcess {
         //
         // Why we don't use a `std::fs::File::try_clone` with a 0 fd?
         // Because for some reason it actually doesn't make the same things as DUP does,
-        // even a research showed that it should.
+        // eventhough a research showed that it should.
         // https://github.com/zhiburt/expectrl/issues/7#issuecomment-884787229
         let stdin_copy_fd = dup(0).map_err(nix_error_to_io)?;
 
