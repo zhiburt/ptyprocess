@@ -398,7 +398,7 @@ impl PtyProcess {
         // verify: possible controlling fd can be stdout and stderr as well?
         // https://stackoverflow.com/questions/35873843/when-setting-terminal-attributes-via-tcsetattrfd-can-fd-be-either-stdout
         #[cfg(not(target_os = "macos"))]
-        let isatty_in = isatty(STDIN_FILENO).unwrap();
+        let isatty_in = isatty(STDIN_FILENO).map_err(nix_error_to_io)?;
         // As CI showed on macos sometimes isatty causes EOPNOTSUPP errno
         // I have no idea why so we are ignoring error on macos and consider it false
         //
