@@ -316,6 +316,62 @@ fn read_to_end() {
 }
 
 #[test]
+fn read_to_end_after_delay() {
+    let mut cmd = Command::new("echo");
+    cmd.arg("Hello World");
+    let mut process = PtyProcess::spawn(cmd).unwrap();
+
+    thread::sleep(Duration::from_millis(500));
+
+    let mut buf = Vec::new();
+    process.read_to_end(&mut buf).unwrap();
+    assert_eq!(&buf, b"Hello World\r\n");
+}
+
+#[test]
+fn read_after_process_is_gone() {
+    let mut cmd = Command::new("echo");
+    cmd.arg("Hello World");
+    let mut process = PtyProcess::spawn(cmd).unwrap();
+
+    // after we check a status of child
+    // it should be marked DEAD.
+    assert_eq!(
+        process.wait().unwrap(),
+        WaitStatus::Exited(process.pid(), 0)
+    );
+
+    // Just in case; make a little delay
+    thread::sleep(Duration::from_millis(500));
+
+    let mut buf = vec![0; 128];
+    let n = process.read(&mut buf).unwrap();
+    assert_eq!(&buf[..n], b"Hello World\r\n");
+}
+
+
+#[test]
+fn read_to_end_after_process_is_gone() {
+    let mut cmd = Command::new("echo");
+    cmd.arg("Hello World");
+    let mut process = PtyProcess::spawn(cmd).unwrap();
+
+    // after we check a status of child
+    // it should be marked DEAD.
+    assert_eq!(
+        process.wait().unwrap(),
+        WaitStatus::Exited(process.pid(), 0)
+    );
+
+    // Just in case; make a little delay
+    thread::sleep(Duration::from_millis(500));
+
+    let mut buf = Vec::new();
+    process.read_to_end(&mut buf).unwrap();
+    assert_eq!(&buf, b"Hello World\r\n");
+}
+
+#[test]
 fn try_read_to_end() {
     let mut cmd = Command::new("echo");
     cmd.arg("Hello World");
@@ -356,12 +412,15 @@ fn continues_try_reads() {
 fn end_of_interact() {
     let mut p = PtyProcess::spawn(Command::new("ls")).unwrap();
     let status = p.interact().unwrap();
-    assert!(matches!(status, WaitStatus::Exited(_, 0)));
+
+    // It may be finished not only because process is done but
+    // also because it reached EOF.
+    assert!(matches!(status, WaitStatus::Exited(_, 0) | WaitStatus::StillAlive));
 
     // check that second spawn works
     let mut p = PtyProcess::spawn(Command::new("ls")).unwrap();
     let status = p.interact().unwrap();
-    assert!(matches!(status, WaitStatus::Exited(_, 0)));
+    assert!(matches!(status, WaitStatus::Exited(_, 0) | WaitStatus::StillAlive));
 }
 
 #[test]
