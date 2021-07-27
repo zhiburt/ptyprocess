@@ -438,7 +438,6 @@ impl PtyProcess {
         // eventhough a research showed that it should.
         // https://github.com/zhiburt/expectrl/issues/7#issuecomment-884787229
         let stdin_copy_fd = dup(STDIN_FILENO).map_err(nix_error_to_io)?;
-
         let stdin = unsafe { std::fs::File::from_raw_fd(stdin_copy_fd) };
         let mut stdin_stream = Stream::new(stdin);
 
@@ -454,11 +453,23 @@ impl PtyProcess {
             //
             // the setting must be set before calling the function.
             if let Some(n) = self.try_read(&mut buf)? {
+                if n == 0 {
+                    // it might be too much to call a `status()` here,
+                    // do it just in case.
+                    return self.status().map_err(nix_error_to_io);
+                }
+
                 std::io::stdout().write_all(&buf[..n])?;
                 std::io::stdout().flush()?;
             }
 
             if let Some(n) = stdin_stream.try_read(&mut buf)? {
+                if n == 0 {
+                    // it might be too much to call a `status()` here,
+                    // do it just in case.
+                    return self.status().map_err(nix_error_to_io);
+                }
+
                 for i in 0..n {
                     // Ctrl-]
                     if buf[i] == ControlCode::GroupSeparator.into() {

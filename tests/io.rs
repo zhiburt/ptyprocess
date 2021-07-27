@@ -305,6 +305,29 @@ fn read_until() {
 }
 
 #[test]
+fn read_to_end() {
+    let mut cmd = Command::new("echo");
+    cmd.arg("Hello World");
+    let mut process = PtyProcess::spawn(cmd).unwrap();
+
+    let mut buf = Vec::new();
+    process.read_to_end(&mut buf).unwrap();
+    assert_eq!(&buf, b"Hello World\r\n");
+}
+
+#[test]
+fn try_read_to_end() {
+    let mut cmd = Command::new("echo");
+    cmd.arg("Hello World");
+    let mut process = PtyProcess::spawn(cmd).unwrap();
+
+    let mut buf = vec![0; 128];
+    while process.try_read(&mut buf).unwrap() != Some(0) {}
+
+    assert_eq!(&buf[..13], b"Hello World\r\n");
+}
+
+#[test]
 fn continues_try_reads() {
     let mut cmd = Command::new("python3");
     cmd.args(vec![
