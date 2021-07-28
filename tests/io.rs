@@ -351,7 +351,6 @@ fn read_after_process_is_gone() {
     assert_eq!(&buf[..n], b"Hello World\r\n");
 }
 
-
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn read_to_end_after_process_is_gone() {
@@ -418,12 +417,18 @@ fn end_of_interact() {
 
     // It may be finished not only because process is done but
     // also because it reached EOF.
-    assert!(matches!(status, WaitStatus::Exited(_, 0) | WaitStatus::StillAlive));
+    assert!(matches!(
+        status,
+        WaitStatus::Exited(_, 0) | WaitStatus::StillAlive
+    ));
 
     // check that second spawn works
     let mut p = PtyProcess::spawn(Command::new("ls")).unwrap();
     let status = p.interact().unwrap();
-    assert!(matches!(status, WaitStatus::Exited(_, 0) | WaitStatus::StillAlive));
+    assert!(matches!(
+        status,
+        WaitStatus::Exited(_, 0) | WaitStatus::StillAlive
+    ));
 }
 
 #[test]
