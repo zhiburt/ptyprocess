@@ -315,6 +315,7 @@ fn read_to_end() {
     assert_eq!(&buf, b"Hello World\r\n");
 }
 
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn read_to_end_after_delay() {
     let mut cmd = Command::new("echo");
@@ -328,6 +329,7 @@ fn read_to_end_after_delay() {
     assert_eq!(&buf, b"Hello World\r\n");
 }
 
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn read_after_process_is_gone() {
     let mut cmd = Command::new("echo");
@@ -350,6 +352,7 @@ fn read_after_process_is_gone() {
 }
 
 
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn read_to_end_after_process_is_gone() {
     let mut cmd = Command::new("echo");
