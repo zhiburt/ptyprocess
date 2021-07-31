@@ -20,8 +20,7 @@ fn set_win_size() {
 #[test]
 fn default_echo() {
     let proc = PtyProcess::spawn(Command::new("cat")).unwrap();
-
-    assert_eq!(proc.get_echo().unwrap(), false);
+    assert!(!proc.get_echo().unwrap());
 }
 
 #[test]
@@ -34,5 +33,5 @@ fn set_echo() {
     proc.wait_echo(true, Some(Duration::from_millis(500)))
         .unwrap();
 
-    assert_eq!(proc.get_echo().unwrap(), true);
+    assert!(proc.get_echo().unwrap());
 }

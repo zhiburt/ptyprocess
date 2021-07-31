@@ -154,6 +154,11 @@ impl PtyProcess {
     /// Be carefull changing a descriptors inner state (e.g `fcntl`)
     /// because it affects all structures which use it.
     ///
+    /// Be carefull using this method in async mode.
+    /// Because descriptor is set to a non-blocking mode which may be unexpected.
+    ///
+    /// In future ut can be private for async feature if it will be considered an issue.
+    ///
     /// # Example
     ///
     /// ```no_run
