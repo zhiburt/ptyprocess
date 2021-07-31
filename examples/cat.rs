@@ -3,10 +3,10 @@
 
 #[cfg(feature = "sync")]
 fn main() {
-    use ptyprocess::PtyProcess;
+    use ptyprocess::{ControlCode, PtyProcess};
     use std::{
         fs::File,
-        io::{self, BufRead},
+        io::{self, Read},
         ops::DerefMut,
         process::Command,
     };
@@ -17,20 +17,13 @@ fn main() {
 
     io::copy(&mut this_file, process.deref_mut()).expect("Can't copy a file");
 
+    process
+        .send_control(ControlCode::EndOfTransmission)
+        .expect("Error while exiting a process");
+
     // We can't read_to_end as the process isn't DEAD but at time time it is it's already a EOF
     let mut file = Vec::new();
-    let mut buf = String::new();
-    // 10 - count lines in this file
-    for _ in 0..10 {
-        let n = process
-            .read_line(&mut buf)
-            .expect("Failed to read from a cat");
-        file.extend_from_slice(&buf.as_bytes()[..n]);
-    }
-
-    process
-        .send_control('C')
-        .expect("Error while exiting a process");
+    process.read_to_end(&mut file).expect("Erorr on read");
 
     println!("{}", String::from_utf8_lossy(&file));
 }
