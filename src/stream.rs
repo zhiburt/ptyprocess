@@ -312,5 +312,14 @@ mod async_stream {
 /// PTY may doesn't have anything to read but the process is not DEAD,
 /// and this erorr may be returned.  
 fn has_reached_end_of_sdtout(err: &std::io::Error) -> bool {
-    err.kind() == std::io::ErrorKind::Other && err.raw_os_error() == Some(5)
+    // We don't match `err.kind()` because on stable we would expect `Other` but for those who uses nightly
+    // we would need to expect `Uncategorized` behind `#![feature(io_error_uncategorized)]` unstable feature.
+    // https://doc.rust-lang.org/beta/unstable-book/library-features/io-error-uncategorized.html
+    // https://doc.rust-lang.org/nightly/std/io/struct.Error.html#method.kind
+    //
+    // But we can't use a cfg!() currently to determine if a unstable feature is turned on.
+    // https://stackoverflow.com/questions/67454353/how-to-detect-if-an-unstable-feature-is-enabled
+    //
+    // So we match only errno code.
+    err.raw_os_error() == Some(5)
 }
