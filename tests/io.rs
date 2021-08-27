@@ -143,6 +143,7 @@ fn read_to_end() {
     assert_eq!(buf, b"Hello World\r\n");
 }
 
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn read_to_end_on_handle() {
     let mut cmd = Command::new("echo");
@@ -151,6 +152,19 @@ fn read_to_end_on_handle() {
     let mut w = proc.get_pty_handle().unwrap();
 
     assert!(w.read_to_end(&mut Vec::new()).is_err());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn read_to_end_on_handle() {
+    let mut cmd = Command::new("echo");
+    cmd.arg("Hello World");
+    let proc = PtyProcess::spawn(cmd).unwrap();
+    let mut w = proc.get_pty_handle().unwrap();
+
+    let mut buf = Vec::new();
+    let n = w.read_to_end(&mut buf);
+    assert_eq!(&buf[..n], b"Hello World\r\n");
 }
 
 #[cfg(not(target_os = "macos"))]
