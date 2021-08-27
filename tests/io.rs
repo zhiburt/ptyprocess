@@ -1,5 +1,10 @@
 use ptyprocess::{PtyProcess, Signal, WaitStatus};
-use std::{io::{BufRead, BufReader, LineWriter, Read, Write}, process::Command, thread, time::Duration};
+use std::{
+    io::{BufRead, BufReader, LineWriter, Read, Write},
+    process::Command,
+    thread,
+    time::Duration,
+};
 
 #[test]
 fn custom_reader_writer() {

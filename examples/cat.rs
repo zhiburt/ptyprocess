@@ -1,12 +1,11 @@
+use ptyprocess::PtyProcess;
 /// To run an example run the following command
 /// `cargo run --example cat`.
-
 use std::{
     fs::File,
     io::{self, Read, Write},
     process::Command,
 };
-use ptyprocess::PtyProcess;
 
 fn main() {
     let process = PtyProcess::spawn(Command::new("cat")).expect("Error while spawning process");

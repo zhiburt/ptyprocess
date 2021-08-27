@@ -3,8 +3,8 @@
 ///
 /// The example is based on https://github.com/zhiburt/ptyprocess/issues/2
 use ptyprocess::PtyProcess;
-use std::process::Command;
 use std::io::{BufRead, BufReader};
+use std::process::Command;
 
 fn main() {
     let mut cmd = Command::new("find");
