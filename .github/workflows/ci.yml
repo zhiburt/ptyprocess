@@ -31,14 +31,13 @@ jobs:
       fail-fast: false
       matrix:
         platform: [ubuntu-latest, macos-latest]
-        feauture: [--features default, --no-default-features --features async]
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose ${{ matrix.feauture }} 
+          args: --verbose
 
   fmt:
     name: Rustfmt

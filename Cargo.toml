@@ -12,13 +12,5 @@ readme = "README.md"
 keywords = ["PTY", "TTY", "pty", "tty", "fork"]
 categories = ["development-tools"]
 
-[features]
-default = ["sync"]
-sync = []
-async = ["async-io", "futures-lite", "pin-project"]
-
 [dependencies]
 nix = "0.21.0"
-async-io = { version="1.6.0", optional=true }
-futures-lite = { version="1.12.0", optional=true }
-pin-project = { version="1.0.7", optional=true }
