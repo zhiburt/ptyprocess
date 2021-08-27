@@ -163,7 +163,7 @@ fn read_to_end_on_handle() {
     let mut w = proc.get_pty_handle().unwrap();
 
     let mut buf = Vec::new();
-    let n = w.read_to_end(&mut buf);
+    let n = w.read_to_end(&mut buf).unwrap();
     assert_eq!(&buf[..n], b"Hello World\r\n");
 }
 
