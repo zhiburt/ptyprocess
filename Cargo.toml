@@ -1,6 +1,6 @@
 [package]
 name = "ptyprocess"
-version = "0.1.9"
+version = "0.2.0"
 authors = ["Maxim Zhiburt <zhiburt@gmail.com>"]
 edition = "2018"
 description = "A library for cutting a string while preserving colors."
