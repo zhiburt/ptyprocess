@@ -132,6 +132,7 @@ impl PtyProcess {
                     let slave_fd = master.get_slave_fd()?;
                     drop(master);
 
+                    #[cfg(not(target_os = "freebsd"))]
                     make_controlling_tty(&device)?;
                     redirect_std_streams(slave_fd)?;
 
