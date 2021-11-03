@@ -134,6 +134,17 @@ impl PtyProcess {
 
                     #[cfg(not(target_os = "freebsd"))]
                     make_controlling_tty(&device)?;
+
+                    #[cfg(target_os = "freebsd")]
+                    {
+                        use nix::libc::ioctl;
+                        use nix::libc::TIOCSCTTY;
+                        match unsafe { ioctl(slave_fd, TIOCSCTTY as u64, 0) } {
+                            0 => {},
+                            _ => return Err(Error::last()),
+                        }
+                    }
+
                     redirect_std_streams(slave_fd)?;
 
                     set_echo(STDIN_FILENO, false)?;
