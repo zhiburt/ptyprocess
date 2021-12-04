@@ -735,6 +735,9 @@ mod tests {
         #[cfg(target_os = "freebsd")]
         assert!(slavename.starts_with("pts/"), "pty_path=={}", slavename);
 
+        #[cfg(target_os = "macos")]
+        assert!(slavename.starts_with("/dev/ttys"), "pty_path=={}", slavename);
+
         #[cfg(not(target_os = "freebsd"))]
         assert!(slavename.starts_with("/dev/pts/"), "pty_path=={}", slavename);
 
