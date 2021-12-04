@@ -731,8 +731,13 @@ mod tests {
         master.grant_slave_access()?;
         master.unlock_slave()?;
         let slavename = master.get_slave_name()?;
-        assert!(slavename.starts_with("/dev"));
-        println!("slave name {}", slavename);
+
+        #[cfg(target_os = "freebsd")]
+        assert!(slavename.starts_with("pts/"), "pty_path=={}", slavename);
+
+        #[cfg(not(target_os = "freebsd"))]
+        assert!(slavename.starts_with("/dev/pts/"), "pty_path=={}", slavename);
+
         Ok(())
     }
 
