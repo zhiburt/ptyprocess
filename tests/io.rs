@@ -169,11 +169,11 @@ fn read_to_end() {
 
     #[cfg(target_os = "linux")]
     {
-        assert_eq!(b"Hello World\r\n", buf);
+        assert_eq!(b"Hello World\r\n", &buf);
     }
     #[cfg(any(target_os = "macos", target_os = "freebsd"))]
     {
-        assert_eq!(b"", buf);
+        assert_eq!(b"", &buf);
     }
 }
 
