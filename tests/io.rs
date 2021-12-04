@@ -162,18 +162,18 @@ fn read_to_end() {
     let mut w = proc.get_pty_stream().unwrap();
 
     // without a sleep we can't guarantee what we actually test
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(1500));
 
     let mut buf = Vec::new();
     w.read_to_end(&mut buf).unwrap();
 
     #[cfg(target_os = "linux")]
     {
-        assert_eq!(buf, b"Hello World\r\n");
+        assert_eq!(b"Hello World\r\n", buf);
     }
     #[cfg(any(target_os = "macos", target_os = "freebsd"))]
     {
-        assert_eq!(&buf, b"");
+        assert_eq!(b"", buf);
     }
 }
 
@@ -185,7 +185,7 @@ fn read_to_end_on_handle() {
     let mut w = proc.get_pty_handle().unwrap();
 
     // without a sleep we can't guarantee what we actually test
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(1500));
 
     #[cfg(target_os = "linux")]
     {
@@ -196,7 +196,7 @@ fn read_to_end_on_handle() {
     #[cfg(any(target_os = "macos", target_os = "freebsd"))]
     {
         let n = w.read_to_end(&mut Vec::new()).unwrap();
-        assert_eq!(0, 13);
+        assert_eq!(0, n);
     }
 }
 
