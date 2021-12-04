@@ -166,7 +166,15 @@ fn read_to_end() {
 
     let mut buf = Vec::new();
     w.read_to_end(&mut buf).unwrap();
-    assert_eq!(buf, b"Hello World\r\n");
+
+    #[cfg(target_os = "linux")]
+    {
+        assert_eq!(buf, b"Hello World\r\n");
+    }
+    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+    {
+        assert_eq!(&buf, b"");
+    }
 }
 
 #[test]
@@ -176,6 +184,9 @@ fn read_to_end_on_handle() {
     let proc = PtyProcess::spawn(cmd).unwrap();
     let mut w = proc.get_pty_handle().unwrap();
 
+    // without a sleep we can't guarantee what we actually test
+    std::thread::sleep(Duration::from_millis(500));
+
     #[cfg(target_os = "linux")]
     {
         let err = w.read_to_end(&mut Vec::new()).unwrap_err();
@@ -184,24 +195,9 @@ fn read_to_end_on_handle() {
 
     #[cfg(any(target_os = "macos", target_os = "freebsd"))]
     {
-        let mut buf = Vec::new();
-        let n = w.read_to_end(&mut buf).unwrap();
-        assert_eq!(&buf[..n], b"Hello World\r\n");
+        let n = w.read_to_end(&mut Vec::new()).unwrap();
+        assert_eq!(0, n);
     }
-}
-
-#[test]
-fn read_to_end_after_delay() {
-    let mut cmd = Command::new("echo");
-    cmd.arg("Hello World");
-    let proc = PtyProcess::spawn(cmd).unwrap();
-    let mut w = proc.get_pty_stream().unwrap();
-
-    thread::sleep(Duration::from_millis(500));
-
-    let mut buf = Vec::new();
-    let n = w.read_to_end(&mut buf).unwrap();
-    assert_eq!(&buf[..n], b"Hello World\r\n");
 }
 
 #[test]
