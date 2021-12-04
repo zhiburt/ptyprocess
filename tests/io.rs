@@ -199,18 +199,9 @@ fn read_to_end_after_delay() {
 
     thread::sleep(Duration::from_millis(500));
 
-    #[cfg(target_os = "linux")]
-    {
-        let mut buf = Vec::new();
-        let n = w.read_to_end(&mut buf).unwrap();
-        assert_eq!(&buf[..n], b"Hello World\r\n");
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
-    {
-        let err = w.read_to_end(&mut Vec::new()).unwrap_err();
-        assert_eq!(Some(5), err.raw_os_error());
-    }
+    let mut buf = Vec::new();
+    let n = w.read_to_end(&mut buf).unwrap();
+    assert_eq!(&buf[..n], b"Hello World\r\n");
 }
 
 #[test]
