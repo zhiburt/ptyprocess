@@ -84,11 +84,17 @@ fn read_after_process_exit() {
     let exited = proc.exit(true).unwrap();
     assert!(exited);
 
-    writeln!(w, "World").unwrap();
+    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
 
-    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
-    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
-    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+    // on macos we can't write after proces is exited
+    // on linux its ok
+    if let Ok(_) = writeln!(w, "World") {
+        assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+        assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+        assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+    }
 }
 
 #[test]
