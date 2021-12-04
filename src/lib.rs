@@ -732,14 +732,15 @@ mod tests {
         master.unlock_slave()?;
         let slavename = master.get_slave_name()?;
 
-        #[cfg(target_os = "freebsd")]
-        assert!(slavename.starts_with("pts/"), "pty_path=={}", slavename);
+        let expected_path = if cfg!(target_os = "freebsd") {
+            "pts/"
+        } else if cfg!(target_os = "macos") {
+            "/dev/ttys"
+        } else {
+            "/dev/pts/"
+        };
 
-        #[cfg(target_os = "macos")]
-        assert!(slavename.starts_with("/dev/ttys"), "pty_path=={}", slavename);
-
-        #[cfg(not(target_os = "freebsd"))]
-        assert!(slavename.starts_with("/dev/pts/"), "pty_path=={}", slavename);
+        assert!(slavename.starts_with(expected_path), "pty_path=={}", slavename);
 
         Ok(())
     }
