@@ -196,7 +196,7 @@ fn read_to_end_on_handle() {
     #[cfg(any(target_os = "macos", target_os = "freebsd"))]
     {
         let n = w.read_to_end(&mut Vec::new()).unwrap();
-        assert_eq!(0, n);
+        assert_eq!(0, 13);
     }
 }
 
