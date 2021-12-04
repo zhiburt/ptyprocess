@@ -740,7 +740,11 @@ mod tests {
             "/dev/pts/"
         };
 
-        assert!(slavename.starts_with(expected_path), "pty_path=={}", slavename);
+        assert!(
+            slavename.starts_with(expected_path),
+            "pty_path=={}",
+            slavename
+        );
 
         Ok(())
     }
