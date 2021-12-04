@@ -59,7 +59,7 @@ fn cat_eof() {
 }
 
 #[test]
-fn read_after_process_exit() {
+fn read_more_then_process_gives() {
     let mut command = Command::new("echo");
     command.arg("hello cat");
     let proc = PtyProcess::spawn(command).unwrap();
@@ -72,6 +72,23 @@ fn read_after_process_exit() {
     assert_eq!(0, w.read(&mut [0; 128]).unwrap());
     assert_eq!(0, w.read(&mut [0; 128]).unwrap());
     assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
+}
+
+#[test]
+fn read_after_process_exit() {
+    let mut proc = PtyProcess::spawn(Command::new("cat")).unwrap();
+    let mut w = proc.get_pty_stream().unwrap();
+
+    writeln!(w, "Hello").unwrap();
+
+    let exited = proc.exit(true).unwrap();
+    assert!(exited);
+
+    writeln!(w, "World").unwrap();
+
+    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
 }
 
 #[test]
