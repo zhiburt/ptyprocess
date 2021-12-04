@@ -114,9 +114,6 @@ impl PtyProcess {
     ///     let proc = PtyProcess::spawn(Command::new("bash"));
     /// ```
     pub fn spawn(mut command: Command) -> Result<Self> {
-        let eof_char = get_eof_char();
-        let intr_char = get_intr_char();
-
         let master = Master::open()?;
         master.grant_slave_access()?;
         master.unlock_slave()?;
@@ -130,7 +127,6 @@ impl PtyProcess {
                 let err = || -> Result<()> {
                     let device = master.get_slave_name()?;
                     let slave_fd = master.get_slave_fd()?;
-                    drop(master);
 
                     make_controlling_tty(slave_fd, &device)?;
 
@@ -139,20 +135,25 @@ impl PtyProcess {
                     set_echo(STDIN_FILENO, false)?;
                     set_term_size(STDIN_FILENO, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
 
-                    close(exec_err_pipe_read)?;
-                    // close pipe on sucessfull exec
-                    fcntl(exec_err_pipe_write, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
-
                     // Do not allow child to inherit open file descriptors from parent
                     //
                     // on linux could be used getrlimit(RLIMIT_NOFILE, rlim) interface
                     let max_open_fds = sysconf(SysconfVar::OPEN_MAX)?.unwrap() as i32;
-                    // Why closing FD 1 causes an endless loop
                     (3..max_open_fds)
-                        .filter(|&fd| fd != slave_fd && fd != exec_err_pipe_write)
+                        .filter(|&fd| fd != exec_err_pipe_write)
+                        .filter(|&fd| {
+                            fd != slave_fd && fd != exec_err_pipe_read && fd != master.as_raw_fd()
+                        }) // dont double free
                         .for_each(|fd| {
                             let _ = close(fd);
                         });
+
+                    drop(master);
+                    close(exec_err_pipe_read)?;
+                    close(slave_fd)?;
+
+                    // close pipe on sucessfull exec
+                    fcntl(exec_err_pipe_write, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
 
                     let _ = command.exec();
                     Err(Error::last())
@@ -162,6 +163,7 @@ impl PtyProcess {
                 let code = err.as_errno().map_or(-1, |e| e as i32);
 
                 write(exec_err_pipe_write, &code.to_be_bytes())?;
+                close(exec_err_pipe_write)?;
 
                 process::exit(code);
             }
@@ -175,9 +177,14 @@ impl PtyProcess {
                     return Err(Error::from_errno(errno::from_i32(code)));
                 }
 
+                close(exec_err_pipe_read)?;
+
                 // Some systems may work in this way? (not sure)
                 // that we need to set a terminal size in a parent.
                 set_term_size(master.as_raw_fd(), DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
+
+                let eof_char = get_eof_char();
+                let intr_char = get_intr_char();
 
                 Ok(Self {
                     master,
