@@ -59,7 +59,7 @@ fn cat_eof() {
 }
 
 #[test]
-fn read_after_process_exit() {
+fn read_more_then_process_gives() {
     let mut command = Command::new("echo");
     command.arg("hello cat");
     let proc = PtyProcess::spawn(command).unwrap();
@@ -72,6 +72,35 @@ fn read_after_process_exit() {
     assert_eq!(0, w.read(&mut [0; 128]).unwrap());
     assert_eq!(0, w.read(&mut [0; 128]).unwrap());
     assert_eq!(proc.wait().unwrap(), WaitStatus::Exited(proc.pid(), 0));
+}
+
+#[test]
+fn read_after_process_exit() {
+    let mut proc = PtyProcess::spawn(Command::new("cat")).unwrap();
+    let mut w = proc.get_pty_stream().unwrap();
+
+    writeln!(w, "Hello").unwrap();
+
+    std::thread::sleep(Duration::from_millis(500));
+
+    let exited = proc.exit(true).unwrap();
+    assert!(exited);
+
+    #[cfg(target_os = "linux")]
+    {
+        assert_eq!(7, w.read(&mut [0; 128]).unwrap());
+    }
+
+    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+
+    // on macos we can't write after proces is exited
+    // on linux its ok
+    if let Ok(_) = writeln!(w, "World") {
+        assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+        assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+        assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+    }
 }
 
 #[test]
@@ -138,12 +167,22 @@ fn read_to_end() {
     let proc = PtyProcess::spawn(cmd).unwrap();
     let mut w = proc.get_pty_stream().unwrap();
 
+    // without a sleep we can't guarantee what we actually test
+    std::thread::sleep(Duration::from_millis(1500));
+
     let mut buf = Vec::new();
     w.read_to_end(&mut buf).unwrap();
-    assert_eq!(buf, b"Hello World\r\n");
+
+    #[cfg(target_os = "linux")]
+    {
+        assert_eq!(buf, b"Hello World\r\n");
+    }
+    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+    {
+        assert_eq!(buf, b"");
+    }
 }
 
-#[cfg(not(target_os = "macos"))]
 #[test]
 fn read_to_end_on_handle() {
     let mut cmd = Command::new("echo");
@@ -151,38 +190,22 @@ fn read_to_end_on_handle() {
     let proc = PtyProcess::spawn(cmd).unwrap();
     let mut w = proc.get_pty_handle().unwrap();
 
-    assert!(w.read_to_end(&mut Vec::new()).is_err());
+    // without a sleep we can't guarantee what we actually test
+    std::thread::sleep(Duration::from_millis(1500));
+
+    #[cfg(target_os = "linux")]
+    {
+        let err = w.read_to_end(&mut Vec::new()).unwrap_err();
+        assert_eq!(Some(5), err.raw_os_error());
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+    {
+        let n = w.read_to_end(&mut Vec::new()).unwrap();
+        assert_eq!(0, n);
+    }
 }
 
-#[cfg(target_os = "macos")]
-#[test]
-fn read_to_end_on_handle() {
-    let mut cmd = Command::new("echo");
-    cmd.arg("Hello World");
-    let proc = PtyProcess::spawn(cmd).unwrap();
-    let mut w = proc.get_pty_handle().unwrap();
-
-    let mut buf = Vec::new();
-    let n = w.read_to_end(&mut buf).unwrap();
-    assert_eq!(&buf[..n], b"Hello World\r\n");
-}
-
-#[cfg(not(target_os = "macos"))]
-#[test]
-fn read_to_end_after_delay() {
-    let mut cmd = Command::new("echo");
-    cmd.arg("Hello World");
-    let proc = PtyProcess::spawn(cmd).unwrap();
-    let mut w = proc.get_pty_stream().unwrap();
-
-    thread::sleep(Duration::from_millis(500));
-
-    let mut buf = Vec::new();
-    w.read_to_end(&mut buf).unwrap();
-    assert_eq!(buf, b"Hello World\r\n")
-}
-
-#[cfg(not(target_os = "macos"))]
 #[test]
 fn read_after_process_is_gone() {
     let mut cmd = Command::new("echo");
@@ -197,12 +220,19 @@ fn read_after_process_is_gone() {
     // Just in case; make a little delay
     thread::sleep(Duration::from_millis(500));
 
-    let mut buf = vec![0; 128];
-    let n = w.read(&mut buf).unwrap();
-    assert_eq!(&buf[..n], b"Hello World\r\n");
+    #[cfg(target_os = "linux")]
+    {
+        let mut buf = vec![0; 128];
+        let n = w.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"Hello World\r\n");
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+    {
+        assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+    }
 }
 
-#[cfg(not(target_os = "macos"))]
 #[test]
 fn read_to_end_after_process_is_gone() {
     let mut cmd = Command::new("echo");
@@ -217,7 +247,17 @@ fn read_to_end_after_process_is_gone() {
     // Just in case; make a little delay
     thread::sleep(Duration::from_millis(500));
 
-    let mut buf = Vec::new();
-    w.read_to_end(&mut buf).unwrap();
-    assert_eq!(buf, b"Hello World\r\n")
+    #[cfg(target_os = "linux")]
+    {
+        let mut buf = Vec::new();
+        w.read_to_end(&mut buf).unwrap();
+        assert_eq!(buf, b"Hello World\r\n")
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "freebsd"))]
+    {
+        let mut buf = Vec::new();
+        w.read_to_end(&mut buf).unwrap();
+        assert_eq!(buf, b"")
+    }
 }

@@ -114,9 +114,6 @@ impl PtyProcess {
     ///     let proc = PtyProcess::spawn(Command::new("bash"));
     /// ```
     pub fn spawn(mut command: Command) -> Result<Self> {
-        let eof_char = get_eof_char();
-        let intr_char = get_intr_char();
-
         let master = Master::open()?;
         master.grant_slave_access()?;
         master.unlock_slave()?;
@@ -130,28 +127,33 @@ impl PtyProcess {
                 let err = || -> Result<()> {
                     let device = master.get_slave_name()?;
                     let slave_fd = master.get_slave_fd()?;
-                    drop(master);
 
-                    make_controlling_tty(&device)?;
+                    make_controlling_tty(slave_fd, &device)?;
+
                     redirect_std_streams(slave_fd)?;
 
                     set_echo(STDIN_FILENO, false)?;
                     set_term_size(STDIN_FILENO, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
 
-                    close(exec_err_pipe_read)?;
-                    // close pipe on sucessfull exec
-                    fcntl(exec_err_pipe_write, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
-
                     // Do not allow child to inherit open file descriptors from parent
                     //
                     // on linux could be used getrlimit(RLIMIT_NOFILE, rlim) interface
                     let max_open_fds = sysconf(SysconfVar::OPEN_MAX)?.unwrap() as i32;
-                    // Why closing FD 1 causes an endless loop
                     (3..max_open_fds)
-                        .filter(|&fd| fd != slave_fd && fd != exec_err_pipe_write)
+                        .filter(|&fd| fd != exec_err_pipe_write)
+                        .filter(|&fd| {
+                            fd != slave_fd && fd != exec_err_pipe_read && fd != master.as_raw_fd()
+                        }) // dont double free
                         .for_each(|fd| {
                             let _ = close(fd);
                         });
+
+                    drop(master);
+                    close(exec_err_pipe_read)?;
+                    close(slave_fd)?;
+
+                    // close pipe on sucessfull exec
+                    fcntl(exec_err_pipe_write, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
 
                     let _ = command.exec();
                     Err(Error::last())
@@ -161,6 +163,7 @@ impl PtyProcess {
                 let code = err.as_errno().map_or(-1, |e| e as i32);
 
                 write(exec_err_pipe_write, &code.to_be_bytes())?;
+                close(exec_err_pipe_write)?;
 
                 process::exit(code);
             }
@@ -174,9 +177,14 @@ impl PtyProcess {
                     return Err(Error::from_errno(errno::from_i32(code)));
                 }
 
+                close(exec_err_pipe_read)?;
+
                 // Some systems may work in this way? (not sure)
                 // that we need to set a terminal size in a parent.
                 set_term_size(master.as_raw_fd(), DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
+
+                let eof_char = get_eof_char();
+                let intr_char = get_intr_char();
 
                 Ok(Self {
                     master,
@@ -433,9 +441,21 @@ impl Master {
         get_slave_name(&self.fd)
     }
 
+    #[cfg(not(target_os = "freebsd"))]
     fn get_slave_fd(&self) -> Result<RawFd> {
         let slave_name = self.get_slave_name()?;
         let slave_fd = open(slave_name.as_str(), OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty())?;
+        Ok(slave_fd)
+    }
+
+    #[cfg(target_os = "freebsd")]
+    fn get_slave_fd(&self) -> Result<RawFd> {
+        let slave_name = self.get_slave_name()?;
+        let slave_fd = open(
+            format!("/dev/{}", slave_name.as_str()).as_str(),
+            OFlag::O_RDWR,
+            Mode::empty(),
+        )?;
         Ok(slave_fd)
     }
 
@@ -453,9 +473,74 @@ impl AsRawFd for Master {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 fn get_slave_name(fd: &PtyMaster) -> Result<String> {
     nix::pty::ptsname_r(fd)
+}
+
+#[cfg(target_os = "freebsd")]
+fn get_slave_name(fd: &PtyMaster) -> Result<String> {
+    use std::ffi::CStr;
+    use std::os::raw::c_char;
+    use std::os::unix::prelude::AsRawFd;
+
+    let fd = fd.as_raw_fd();
+
+    if !isptmaster(fd)? {
+        // never reached according current implementation of isptmaster
+        return Err(nix::Error::Sys(Errno::EINVAL));
+    }
+
+    // todo: Need to determine the correct size via some contstant like SPECNAMELEN in <sys/filio.h>
+    let mut buf: [c_char; 128] = [0; 128];
+
+    let _ = fdevname_r(fd, &mut buf)?;
+
+    // todo: determine how CStr::from_ptr handles not NUL terminated string.
+    let string = unsafe { CStr::from_ptr(buf.as_ptr()) }
+        .to_string_lossy()
+        .into_owned();
+
+    return Ok(string);
+}
+
+// https://github.com/freebsd/freebsd-src/blob/main/lib/libc/stdlib/ptsname.c#L52
+#[cfg(target_os = "freebsd")]
+fn isptmaster(fd: RawFd) -> Result<bool> {
+    use nix::libc::ioctl;
+    use nix::libc::TIOCPTMASTER;
+    match unsafe { ioctl(fd, TIOCPTMASTER as u64, 0) } {
+        0 => Ok(true),
+        _ => Err(Error::last()),
+    }
+}
+
+/* automatically generated by rust-bindgen 0.59.1 */
+// bindgen filio.h --allowlist-type fiodgname_arg -o bindings.rs
+// it may be worth to use a build.rs if we will need more FFI structures.
+#[cfg(target_os = "freebsd")]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct fiodgname_arg {
+    pub len: ::std::os::raw::c_int,
+    pub buf: *mut ::std::os::raw::c_void,
+}
+
+// https://github.com/freebsd/freebsd-src/blob/6ae38ab45396edaea26b4725e0c7db8cffa5f208/lib/libc/gen/fdevname.c#L39
+#[cfg(target_os = "freebsd")]
+fn fdevname_r(fd: RawFd, buf: &mut [std::os::raw::c_char]) -> Result<()> {
+    use nix::libc::{ioctl, FIODGNAME};
+
+    nix::ioctl_read_bad!(_ioctl_fiodgname, FIODGNAME, fiodgname_arg);
+
+    let mut fgn = fiodgname_arg {
+        len: buf.len() as i32,
+        buf: buf.as_mut_ptr() as *mut ::std::os::raw::c_void,
+    };
+
+    let _ = unsafe { _ioctl_fiodgname(fd, &mut fgn) }?;
+
+    Ok(())
 }
 
 /// Getting a slave name on darvin platform
@@ -573,44 +658,65 @@ fn get_term_char(fd: RawFd, char: SpecialCharacterIndices) -> Result<u8> {
     Ok(b)
 }
 
-fn make_controlling_tty(child_name: &str) -> Result<()> {
-    // Is this appoach's result the same as just call ioctl TIOCSCTTY?
+fn make_controlling_tty(#[allow(unused)] tty_fd: RawFd, child_name: &str) -> Result<()> {
+    #[cfg(not(any(target_os = "freebsd", target_os = "macos")))]
+    {
+        // https://github.com/pexpect/ptyprocess/blob/c69450d50fbd7e8270785a0552484182f486092f/ptyprocess/_fork_pty.py
 
-    // Disconnect from controlling tty, if any
-    let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty());
-    match fd {
-        Ok(fd) => {
-            close(fd)?;
+        // Disconnect from controlling tty, if any
+        //
+        // it may be a simmilar call to ioctl TIOCNOTTY
+        // https://man7.org/linux/man-pages/man4/tty_ioctl.4.html
+        let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty());
+        match fd {
+            Ok(fd) => {
+                close(fd)?;
+            }
+            Err(Error::Sys(Errno::ENXIO)) => {
+                // Sometimes we get ENXIO right here which 'probably' means
+                // that we has been already disconnected from controlling tty.
+                // Specifically it was discovered on ubuntu-latest Github CI platform.
+            }
+            Err(err) => return Err(err),
         }
-        Err(Error::Sys(Errno::ENXIO)) => {
-            // Sometimes we get ENXIO right here which 'probably' means
-            // that we has been already disconnected from controlling tty.
-            // Specifically it was discovered on ubuntu-latest Github CI platform.
+
+        // setsid() will remove the controlling tty. Also the ioctl TIOCNOTTY does this.
+        // https://www.win.tue.nl/~aeb/linux/lk/lk-10.html
+        setsid()?;
+
+        // Verify we are disconnected from controlling tty by attempting to open
+        // it again.  We expect that OSError of ENXIO should always be raised.
+        let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty());
+        match fd {
+            Err(Error::Sys(Errno::ENXIO)) => {} // ok
+            Ok(fd) => {
+                close(fd)?;
+                return Err(Error::UnsupportedOperation);
+            }
+            Err(_) => return Err(Error::UnsupportedOperation),
         }
-        Err(err) => return Err(err),
+
+        // Verify we can open child pty.
+        let fd = open(child_name, OFlag::O_RDWR, Mode::empty())?;
+        close(fd)?;
+
+        // Verify we now have a controlling tty.
+        let fd = open("/dev/tty", OFlag::O_WRONLY, Mode::empty())?;
+        close(fd)?;
     }
 
-    setsid()?;
+    #[cfg(any(target_os = "freebsd", target_os = "macos"))]
+    {
+        // https://docs.freebsd.org/44doc/smm/01.setup/paper-3.html
+        setsid()?;
 
-    // Verify we are disconnected from controlling tty by attempting to open
-    // it again.  We expect that OSError of ENXIO should always be raised.
-    let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty());
-    match fd {
-        Err(Error::Sys(Errno::ENXIO)) => {} // ok
-        Ok(fd) => {
-            close(fd)?;
-            return Err(Error::UnsupportedOperation);
+        use nix::libc::ioctl;
+        use nix::libc::TIOCSCTTY;
+        match unsafe { ioctl(tty_fd, TIOCSCTTY as u64, 0) } {
+            0 => {}
+            _ => return Err(Error::last()),
         }
-        Err(_) => return Err(Error::UnsupportedOperation),
     }
-
-    // Verify we can open child pty.
-    let fd = open(child_name, OFlag::O_RDWR, Mode::empty())?;
-    close(fd)?;
-
-    // Verify we now have a controlling tty.
-    let fd = open("/dev/tty", OFlag::O_WRONLY, Mode::empty())?;
-    close(fd)?;
 
     Ok(())
 }
@@ -625,8 +731,21 @@ mod tests {
         master.grant_slave_access()?;
         master.unlock_slave()?;
         let slavename = master.get_slave_name()?;
-        assert!(slavename.starts_with("/dev"));
-        println!("slave name {}", slavename);
+
+        let expected_path = if cfg!(target_os = "freebsd") {
+            "pts/"
+        } else if cfg!(target_os = "macos") {
+            "/dev/ttys"
+        } else {
+            "/dev/pts/"
+        };
+
+        assert!(
+            slavename.starts_with(expected_path),
+            "pty_path=={}",
+            slavename
+        );
+
         Ok(())
     }
 
