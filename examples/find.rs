@@ -12,7 +12,7 @@ fn main() {
     cmd.stderr(std::process::Stdio::null());
 
     let process = PtyProcess::spawn(cmd).unwrap();
-    let mut reader = BufReader::new(process.get_pty_handle().unwrap());
+    let mut reader = BufReader::new(process.get_raw_handle().unwrap());
 
     let mut buf = String::new();
     loop {

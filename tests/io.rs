@@ -9,7 +9,7 @@ use std::{
 #[test]
 fn custom_reader_writer() {
     let mut proc = PtyProcess::spawn(Command::new("cat")).unwrap();
-    let pty = proc.get_pty_handle().unwrap();
+    let pty = proc.get_raw_handle().unwrap();
     let mut writer = LineWriter::new(&pty);
     let mut reader = BufReader::new(&pty);
 
@@ -27,7 +27,7 @@ fn custom_reader_writer() {
 #[test]
 fn cat_intr() {
     let proc = PtyProcess::spawn(Command::new("cat")).unwrap();
-    let mut w = proc.get_pty_handle().unwrap();
+    let mut w = proc.get_raw_handle().unwrap();
 
     // this sleep solves an edge case of some cases when cat is somehow not "ready"
     // to take the ^C (occasional test hangs)
@@ -46,7 +46,7 @@ fn cat_intr() {
 #[test]
 fn cat_eof() {
     let proc = PtyProcess::spawn(Command::new("cat")).unwrap();
-    let mut w = proc.get_pty_handle().unwrap();
+    let mut w = proc.get_raw_handle().unwrap();
 
     // this sleep solves an edge case of some cases when cat is somehow not "ready"
     // to take the ^D (occasional test hangs)
@@ -96,7 +96,7 @@ fn read_after_process_exit() {
 
     // on macos we can't write after proces is exited
     // on linux its ok
-    if let Ok(_) = writeln!(w, "World") {
+    if writeln!(w, "World").is_ok() {
         assert_eq!(0, w.read(&mut [0; 128]).unwrap());
         assert_eq!(0, w.read(&mut [0; 128]).unwrap());
         assert_eq!(0, w.read(&mut [0; 128]).unwrap());
@@ -121,7 +121,7 @@ fn ptyprocess_check_terminal_line_settings() {
 #[test]
 fn read_line() {
     let mut proc = PtyProcess::spawn(Command::new("cat")).unwrap();
-    let w = proc.get_pty_handle().unwrap();
+    let w = proc.get_raw_handle().unwrap();
     let mut r = BufReader::new(&w);
 
     writeln!(&w, "Hello World 1").unwrap();
@@ -141,7 +141,7 @@ fn read_line() {
 #[test]
 fn read_until() {
     let mut proc = PtyProcess::spawn(Command::new("cat")).unwrap();
-    let w = proc.get_pty_handle().unwrap();
+    let w = proc.get_raw_handle().unwrap();
     let mut r = BufReader::new(&w);
 
     writeln!(&w, "Hello World 1").unwrap();
@@ -188,7 +188,7 @@ fn read_to_end_on_handle() {
     let mut cmd = Command::new("echo");
     cmd.arg("Hello World");
     let proc = PtyProcess::spawn(cmd).unwrap();
-    let mut w = proc.get_pty_handle().unwrap();
+    let mut w = proc.get_raw_handle().unwrap();
 
     // without a sleep we can't guarantee what we actually test
     std::thread::sleep(Duration::from_millis(1500));
@@ -211,7 +211,7 @@ fn read_after_process_is_gone() {
     let mut cmd = Command::new("echo");
     cmd.arg("Hello World");
     let proc = PtyProcess::spawn(cmd).unwrap();
-    let mut w = proc.get_pty_handle().unwrap();
+    let mut w = proc.get_raw_handle().unwrap();
 
     // after we check a status of child
     // it should be marked DEAD.

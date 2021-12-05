@@ -9,7 +9,7 @@ documentation = "https://docs.rs/ptyprocess"
 homepage = "https://github.com/zhiburt/ptyprocess"
 license = "MIT"
 readme = "README.md"
-keywords = ["PTY", "TTY", "pty", "tty", "fork"]
+keywords = ["pty", "tty", "terminal"]
 categories = ["development-tools"]
 
 [dependencies]

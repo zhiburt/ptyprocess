@@ -5,7 +5,9 @@ use std::{
     os::unix::{io::AsRawFd, prelude::RawFd},
 };
 
-/// Stream represent a IO stream.
+/// Stream represent a duplex pipe.
+///
+/// It must work in the same way on all platforms.
 #[derive(Debug)]
 pub struct Stream {
     inner: File,

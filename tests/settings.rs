@@ -29,9 +29,8 @@ fn set_echo() {
 
     assert!(proc.isatty().unwrap());
 
-    proc.set_echo(true).unwrap();
-    proc.wait_echo(true, Some(Duration::from_millis(500)))
-        .unwrap();
-
+    let is_set = proc.set_echo(true, Some(Duration::from_millis(500))).unwrap();
+    
+    assert!(is_set);
     assert!(proc.get_echo().unwrap());
 }

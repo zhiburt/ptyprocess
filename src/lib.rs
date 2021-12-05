@@ -1,51 +1,35 @@
-//! Ptyprocess library provides an interface for a PTY/TTY.
+//! A library provides an interface for a unix [PTY/TTY](https://en.wikipedia.org/wiki/Pseudoterminal).
 //!
-//! The entry point to the library is a [PtyProcess].
-//!
-//! The library provides a `sync` and `async` IO operations for communication.
-//! To be able to use `async` you must to provide a feature flag `[async]`
-//! and turn off default features `default-features = false`.
+//! It aims to work on all major Unix variants.
 //!
 //! The library was developed as a backend for a https://github.com/zhiburt/expectrl.
 //! If you're interested in a high level operations may you'd better take a look at `zhiburt/expectrl`.
 //!
-//! # Example
+//! ## Usage
 //!
-//! ```no_run,ignore
+//! ```rust
 //! use ptyprocess::PtyProcess;
 //! use std::process::Command;
-//! use std::io::{Read, Write};
+//! use std::io::{BufRead, Write, BufReader};
 //!
 //! // spawn a cat process
 //! let mut process = PtyProcess::spawn(Command::new("cat")).expect("failed to spawn a process");
 //!
-//! // write message to cat.
-//! process.write_all(b"hello cat\n").expect("failed to write");
+//! // create a communication stream
+//! let mut stream = process.get_raw_handle().expect("failed to create a stream");
 //!
-//! // read what cat produced.
-//! let mut buf = vec![0; 128];
-//! let size = process.read(&mut buf).expect("failed to read");
-//! assert_eq!(&buf[..size], b"hello cat\r\n");
+//! // send a message to process
+//! writeln!(stream, "Hello cat").expect("failed to write to a stream");
 //!
-//! // stop process
-//! let sucess = process.exit(true).expect("failed to exit");
+//! // read a line from the stream
+//! let mut reader = BufReader::new(stream);
+//! let mut buf = String::new();
+//! reader.read_line(&mut buf).expect("failed to read a process output");
 //!
-//! assert_eq!(sucess, true);
-//! ```
+//! println!("line={}", buf);
 //!
-//! # Async
-//!
-//! ## Example
-//!
-//! ```no_run,ignore
-//! use ptyprocess::PtyProcess;
-//! use std::process::Command;
-//!
-//! // spawns a cat process
-//! let mut process = PtyProcess::spawn(Command::new("cat")).expect("failed to spawn a process");
-//!
-//! // sends line to cat
-//! process.send_line("hello cat").await.expect("failed writing");
+//! // stop the process
+//! assert!(process.exit(true).expect("failed to stop the process"))
 //! ```
 
 pub mod stream;
@@ -79,8 +63,11 @@ use termios::SpecialCharacterIndices;
 
 const DEFAULT_TERM_COLS: u16 = 80;
 const DEFAULT_TERM_ROWS: u16 = 24;
+
 const DEFAULT_VEOF_CHAR: u8 = 0x4; // ^D
 const DEFAULT_INTR_CHAR: u8 = 0x3; // ^C
+
+const DEFAULT_TERMINATE_DELAY: Duration = Duration::from_millis(100);
 
 /// PtyProcess controls a spawned process and communication with this.
 ///
@@ -102,7 +89,7 @@ pub struct PtyProcess {
     child_pid: Pid,
     eof_char: u8,
     intr_char: u8,
-    terminate_approach_delay: Duration,
+    terminate_delay: Duration,
 }
 
 impl PtyProcess {
@@ -191,7 +178,7 @@ impl PtyProcess {
                     child_pid: child,
                     eof_char,
                     intr_char,
-                    terminate_approach_delay: Duration::from_millis(100),
+                    terminate_delay: DEFAULT_TERMINATE_DELAY,
                 })
             }
         }
@@ -202,7 +189,10 @@ impl PtyProcess {
         self.child_pid
     }
 
-    /// Returns a file representation of a PTY, which can be used to communicate with it.
+    /// Returns a file representation of a PTY, which can be used
+    /// to communicate with a spawned process.
+    ///
+    /// The file behaivor is platform dependent.
     ///
     /// # Safety
     ///
@@ -210,9 +200,8 @@ impl PtyProcess {
     /// because it affects all structures which use it.
     ///
     /// Be carefull using this method in async mode.
-    /// Because descriptor is set to a non-blocking mode which may be unexpected.
-    ///
-    /// In future ut can be private for async feature if it will be considered an issue.
+    /// Because descriptor is set to a non-blocking mode will affect all dublicated descriptors
+    /// which may be unexpected.
     ///
     /// # Example
     ///
@@ -221,22 +210,29 @@ impl PtyProcess {
     /// use std::{process::Command, io::{BufReader, LineWriter}};
     ///
     /// let mut process = PtyProcess::spawn(Command::new("cat")).unwrap();
-    /// let pty = process.get_pty_handle().unwrap();
+    /// let pty = process.get_raw_handle().unwrap();
     /// let mut writer = LineWriter::new(&pty);
     /// let mut reader = BufReader::new(&pty);
     /// ```
-    pub fn get_pty_handle(&self) -> Result<File> {
+    pub fn get_raw_handle(&self) -> Result<File> {
         self.master.get_file_handle()
     }
 
+    /// Returns a stream representation of a PTY.
+    /// Which can be used to communicate with a spawned process.
+    ///
+    /// It differs from [Self::get_raw_handle] because it is
+    /// platform independent.
     pub fn get_pty_stream(&self) -> Result<Stream> {
-        self.get_pty_handle().map(Stream::new)
+        self.get_raw_handle().map(Stream::new)
     }
 
+    /// Get a end of file character if set or a default.
     pub fn get_eof_char(&self) -> u8 {
         self.eof_char
     }
 
+    /// Get a interapt character if set or a default.
     pub fn get_intr_char(&self) -> u8 {
         self.intr_char
     }
@@ -253,20 +249,6 @@ impl PtyProcess {
         set_term_size(self.master.as_raw_fd(), cols, rows)
     }
 
-    /// Waits until a echo settings is setup.
-    pub fn wait_echo(&self, on: bool, timeout: Option<Duration>) -> Result<bool> {
-        let now = time::Instant::now();
-        while timeout.is_none() || now.elapsed() < timeout.unwrap() {
-            if on == self.get_echo()? {
-                return Ok(true);
-            }
-
-            thread::sleep(Duration::from_millis(100));
-        }
-
-        Ok(false)
-    }
-
     /// The function returns true if an echo setting is setup.
     pub fn get_echo(&self) -> Result<bool> {
         termios::tcgetattr(self.master.as_raw_fd())
@@ -274,8 +256,9 @@ impl PtyProcess {
     }
 
     /// Sets a echo setting for a terminal
-    pub fn set_echo(&mut self, on: bool) -> Result<()> {
-        set_echo(self.master.as_raw_fd(), on)
+    pub fn set_echo(&mut self, on: bool, timeout: Option<Duration>) -> Result<bool> {
+        set_echo(self.master.as_raw_fd(), on)?;
+        self.wait_echo(on, timeout)
     }
 
     /// Returns true if a underline `fd` connected with a TTY.
@@ -284,8 +267,8 @@ impl PtyProcess {
     }
 
     /// Set the pty process's terminate approach delay.
-    pub fn set_terminate_approach_delay(&mut self, terminate_approach_delay: Duration) {
-        self.terminate_approach_delay = terminate_approach_delay;
+    pub fn set_terminate_delay(&mut self, terminate_approach_delay: Duration) {
+        self.terminate_delay = terminate_approach_delay;
     }
 
     /// Status returns a status a of child process.
@@ -374,9 +357,22 @@ impl PtyProcess {
 
     fn try_to_terminate(&mut self, signal: signal::Signal) -> Result<bool> {
         self.kill(signal)?;
-        thread::sleep(self.terminate_approach_delay);
+        thread::sleep(self.terminate_delay);
 
         self.is_alive().map(|is_alive| !is_alive)
+    }
+
+    fn wait_echo(&self, on: bool, timeout: Option<Duration>) -> Result<bool> {
+        let now = time::Instant::now();
+        while timeout.is_none() || now.elapsed() < timeout.unwrap() {
+            if on == self.get_echo()? {
+                return Ok(true);
+            }
+
+            thread::sleep(Duration::from_millis(100));
+        }
+
+        Ok(false)
     }
 }
 
