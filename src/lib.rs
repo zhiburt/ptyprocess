@@ -444,7 +444,11 @@ impl Master {
     #[cfg(not(target_os = "freebsd"))]
     fn get_slave_fd(&self) -> Result<RawFd> {
         let slave_name = self.get_slave_name()?;
-        let slave_fd = open(slave_name.as_str(), OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty())?;
+        let slave_fd = open(
+            slave_name.as_str(),
+            OFlag::O_RDWR | OFlag::O_NOCTTY,
+            Mode::empty(),
+        )?;
         Ok(slave_fd)
     }
 
