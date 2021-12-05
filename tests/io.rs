@@ -81,10 +81,12 @@ fn read_after_process_exit() {
 
     writeln!(w, "Hello").unwrap();
 
+    std::thread::sleep(Duration::from_millis(500));
+
     let exited = proc.exit(true).unwrap();
     assert!(exited);
 
-    assert_eq!(0, w.read(&mut [0; 128]).unwrap());
+    assert_eq!(7, w.read(&mut [0; 128]).unwrap());
     assert_eq!(0, w.read(&mut [0; 128]).unwrap());
     assert_eq!(0, w.read(&mut [0; 128]).unwrap());
 
