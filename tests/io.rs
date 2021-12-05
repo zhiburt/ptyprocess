@@ -81,7 +81,7 @@ fn read_after_process_exit() {
 
     writeln!(w, "Hello").unwrap();
 
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(1500));
 
     let exited = proc.exit(true).unwrap();
     assert!(exited);
