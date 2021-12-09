@@ -106,7 +106,7 @@ impl PtyProcess {
         master.unlock_slave()?;
 
         // handle errors in child executions by pipe
-        let (exec_err_pipe_read, exec_err_pipe_write) = pipe()?;
+        let (exec_err_pipe_r, exec_err_pipe_w) = pipe()?;
 
         let fork = unsafe { fork()? };
         match fork {
@@ -123,24 +123,22 @@ impl PtyProcess {
                     set_term_size(STDIN_FILENO, DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS)?;
 
                     // Do not allow child to inherit open file descriptors from parent
-                    //
-                    // on linux could be used getrlimit(RLIMIT_NOFILE, rlim) interface
-                    let max_open_fds = sysconf(SysconfVar::OPEN_MAX)?.unwrap() as i32;
-                    (3..max_open_fds)
-                        .filter(|&fd| fd != exec_err_pipe_write)
-                        .filter(|&fd| {
-                            fd != slave_fd && fd != exec_err_pipe_read && fd != master.as_raw_fd()
-                        }) // dont double free
-                        .for_each(|fd| {
-                            let _ = close(fd);
-                        });
+                    close_all_descriptors(&[
+                        0,
+                        1,
+                        2,
+                        slave_fd,
+                        exec_err_pipe_w,
+                        exec_err_pipe_r,
+                        master.as_raw_fd(),
+                    ])?;
 
                     drop(master);
-                    close(exec_err_pipe_read)?;
+                    close(exec_err_pipe_r)?;
                     close(slave_fd)?;
 
                     // close pipe on sucessfull exec
-                    fcntl(exec_err_pipe_write, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
+                    fcntl(exec_err_pipe_w, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
 
                     let _ = command.exec();
                     Err(Error::last())
@@ -149,22 +147,22 @@ impl PtyProcess {
 
                 let code = err.as_errno().map_or(-1, |e| e as i32);
 
-                write(exec_err_pipe_write, &code.to_be_bytes())?;
-                close(exec_err_pipe_write)?;
+                write(exec_err_pipe_w, &code.to_be_bytes())?;
+                close(exec_err_pipe_w)?;
 
                 process::exit(code);
             }
             ForkResult::Parent { child } => {
-                close(exec_err_pipe_write)?;
+                close(exec_err_pipe_w)?;
 
                 let mut pipe_buf = [0u8; 4];
-                unistd::read(exec_err_pipe_read, &mut pipe_buf)?;
+                unistd::read(exec_err_pipe_r, &mut pipe_buf)?;
                 let code = i32::from_be_bytes(pipe_buf);
                 if code != 0 {
                     return Err(Error::from_errno(errno::from_i32(code)));
                 }
 
-                close(exec_err_pipe_read)?;
+                close(exec_err_pipe_r)?;
 
                 // Some systems may work in this way? (not sure)
                 // that we need to set a terminal size in a parent.
@@ -717,6 +715,21 @@ fn make_controlling_tty(#[allow(unused)] tty_fd: RawFd, child_name: &str) -> Res
             _ => return Err(Error::last()),
         }
     }
+
+    Ok(())
+}
+
+// Except is used for cases like double free memory
+fn close_all_descriptors(except: &[RawFd]) -> Result<()> {
+    // On linux could be used getrlimit(RLIMIT_NOFILE, rlim) interface
+    let max_open_fds = sysconf(SysconfVar::OPEN_MAX)?.unwrap() as i32;
+    (0..max_open_fds)
+        .filter(|fd| !except.contains(fd))
+        .for_each(|fd| {
+            // We don't handle errors intentionally,
+            // because it will be hard to determine which descriptors closed already.
+            let _ = close(fd);
+        });
 
     Ok(())
 }
