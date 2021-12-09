@@ -112,11 +112,9 @@ impl PtyProcess {
         match fork {
             ForkResult::Child => {
                 let err = || -> Result<()> {
-                    let device = master.get_slave_name()?;
+                    make_controlling_tty(&master)?;
+
                     let slave_fd = master.get_slave_fd()?;
-
-                    make_controlling_tty(slave_fd, &device)?;
-
                     redirect_std_streams(slave_fd)?;
 
                     set_echo(STDIN_FILENO, false)?;
@@ -133,9 +131,9 @@ impl PtyProcess {
                         master.as_raw_fd(),
                     ])?;
 
-                    drop(master);
-                    close(exec_err_pipe_r)?;
                     close(slave_fd)?;
+                    close(exec_err_pipe_r)?;
+                    drop(master);
 
                     // close pipe on sucessfull exec
                     fcntl(exec_err_pipe_w, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
@@ -656,9 +654,10 @@ fn get_term_char(fd: RawFd, char: SpecialCharacterIndices) -> Result<u8> {
     Ok(b)
 }
 
-fn make_controlling_tty(#[allow(unused)] tty_fd: RawFd, child_name: &str) -> Result<()> {
+fn make_controlling_tty(ptm: &Master) -> Result<()> {
     #[cfg(not(any(target_os = "freebsd", target_os = "macos")))]
     {
+        let pts_name = ptm.get_slave_name()?;
         // https://github.com/pexpect/ptyprocess/blob/c69450d50fbd7e8270785a0552484182f486092f/ptyprocess/_fork_pty.py
 
         // Disconnect from controlling tty, if any
@@ -695,7 +694,7 @@ fn make_controlling_tty(#[allow(unused)] tty_fd: RawFd, child_name: &str) -> Res
         }
 
         // Verify we can open child pty.
-        let fd = open(child_name, OFlag::O_RDWR, Mode::empty())?;
+        let fd = open(pts_name.as_str(), OFlag::O_RDWR, Mode::empty())?;
         close(fd)?;
 
         // Verify we now have a controlling tty.
@@ -705,12 +704,14 @@ fn make_controlling_tty(#[allow(unused)] tty_fd: RawFd, child_name: &str) -> Res
 
     #[cfg(any(target_os = "freebsd", target_os = "macos"))]
     {
+        let pts_fd = ptm.get_slave_fd()?;
+
         // https://docs.freebsd.org/44doc/smm/01.setup/paper-3.html
         setsid()?;
 
         use nix::libc::ioctl;
         use nix::libc::TIOCSCTTY;
-        match unsafe { ioctl(tty_fd, TIOCSCTTY as u64, 0) } {
+        match unsafe { ioctl(pts_fd, TIOCSCTTY as u64, 0) } {
             0 => {}
             _ => return Err(Error::last()),
         }
