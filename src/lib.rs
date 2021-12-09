@@ -143,10 +143,11 @@ impl PtyProcess {
                 }()
                 .unwrap_err();
 
-                let code = err.as_errno().map_or(-1, |e| e as i32);
+                let code = err.as_errno().map_or(-1, |e| e as i32); 
 
-                write(exec_err_pipe_w, &code.to_be_bytes())?;
-                close(exec_err_pipe_w)?;
+                // Intentionally ignoring errors to exit the process properly
+                let _ = write(exec_err_pipe_w, &code.to_be_bytes());
+                let _ = close(exec_err_pipe_w);
 
                 process::exit(code);
             }
@@ -155,12 +156,11 @@ impl PtyProcess {
 
                 let mut pipe_buf = [0u8; 4];
                 unistd::read(exec_err_pipe_r, &mut pipe_buf)?;
+                close(exec_err_pipe_r)?;
                 let code = i32::from_be_bytes(pipe_buf);
                 if code != 0 {
                     return Err(Error::from_errno(errno::from_i32(code)));
                 }
-
-                close(exec_err_pipe_r)?;
 
                 // Some systems may work in this way? (not sure)
                 // that we need to set a terminal size in a parent.
