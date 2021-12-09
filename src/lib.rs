@@ -143,7 +143,7 @@ impl PtyProcess {
                 }()
                 .unwrap_err();
 
-                let code = err.as_errno().map_or(-1, |e| e as i32); 
+                let code = err.as_errno().map_or(-1, |e| e as i32);
 
                 // Intentionally ignoring errors to exit the process properly
                 let _ = write(exec_err_pipe_w, &code.to_be_bytes());
