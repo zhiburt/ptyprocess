@@ -1,6 +1,6 @@
 [package]
 name = "ptyprocess"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Maxim Zhiburt <zhiburt@gmail.com>"]
 edition = "2018"
 description = "A library for cutting a string while preserving colors."
@@ -10,7 +10,7 @@ homepage = "https://github.com/zhiburt/ptyprocess"
 license = "MIT"
 readme = "README.md"
 keywords = ["pty", "tty", "terminal"]
-categories = ["development-tools"]
+categories = ["development-tools", "command-line-interface"]
 
 [dependencies]
 nix = "0.21.0"
