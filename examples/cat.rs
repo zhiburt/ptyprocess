@@ -1,6 +1,4 @@
 use ptyprocess::PtyProcess;
-/// To run an example run the following command
-/// `cargo run --example cat`.
 use std::{
     fs::File,
     io::{self, Read, Write},
