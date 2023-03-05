@@ -34,13 +34,11 @@
 
 pub mod stream;
 
+pub use nix::errno;
 pub use nix::sys::signal::Signal;
 pub use nix::sys::wait::WaitStatus;
 pub use nix::Error;
 
-#[cfg(feature = "async")]
-use futures_lite::AsyncWriteExt;
-use nix::errno::{self, Errno};
 use nix::fcntl::{fcntl, open, FcntlArg, FdFlag, OFlag};
 use nix::libc::{self, winsize, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 use nix::pty::PtyMaster;
@@ -143,7 +141,7 @@ impl PtyProcess {
                 }()
                 .unwrap_err();
 
-                let code = err.as_errno().map_or(-1, |e| e as i32);
+                let code = err as i32;
 
                 // Intentionally ignoring errors to exit the process properly
                 let _ = write(exec_err_pipe_w, &code.to_be_bytes());
@@ -159,7 +157,7 @@ impl PtyProcess {
                 close(exec_err_pipe_r)?;
                 let code = i32::from_be_bytes(pipe_buf);
                 if code != 0 {
-                    return Err(Error::from_errno(errno::from_i32(code)));
+                    return Err(errno::from_i32(code));
                 }
 
                 // Some systems may work in this way? (not sure)
@@ -310,7 +308,7 @@ impl PtyProcess {
         let status = self.status();
         match status {
             Ok(status) if status == WaitStatus::StillAlive => Ok(true),
-            Ok(_) | Err(Error::Sys(Errno::ECHILD)) | Err(Error::Sys(Errno::ESRCH)) => Ok(false),
+            Ok(_) | Err(Error::ECHILD) | Err(Error::ESRCH) => Ok(false),
             Err(err) => Err(err),
         }
     }
@@ -669,7 +667,7 @@ fn make_controlling_tty(ptm: &Master) -> Result<()> {
             Ok(fd) => {
                 close(fd)?;
             }
-            Err(Error::Sys(Errno::ENXIO)) => {
+            Err(Error::ENXIO) => {
                 // Sometimes we get ENXIO right here which 'probably' means
                 // that we has been already disconnected from controlling tty.
                 // Specifically it was discovered on ubuntu-latest Github CI platform.
@@ -685,12 +683,12 @@ fn make_controlling_tty(ptm: &Master) -> Result<()> {
         // it again.  We expect that OSError of ENXIO should always be raised.
         let fd = open("/dev/tty", OFlag::O_RDWR | OFlag::O_NOCTTY, Mode::empty());
         match fd {
-            Err(Error::Sys(Errno::ENXIO)) => {} // ok
+            Err(Error::ENXIO) => {} // ok
             Ok(fd) => {
                 close(fd)?;
-                return Err(Error::UnsupportedOperation);
+                return Err(Error::ENOTSUP);
             }
-            Err(_) => return Err(Error::UnsupportedOperation),
+            Err(_) => return Err(Error::ENOTSUP),
         }
 
         // Verify we can open child pty.
@@ -754,11 +752,9 @@ mod tests {
             "/dev/pts/"
         };
 
-        assert!(
-            slavename.starts_with(expected_path),
-            "pty_path=={}",
-            slavename
-        );
+        if !slavename.starts_with(expected_path) {
+            assert_eq!(expected_path, slavename);
+        }
 
         Ok(())
     }

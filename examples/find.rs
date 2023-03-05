@@ -16,16 +16,15 @@ fn main() {
 
     let mut buf = String::new();
     loop {
-        match reader.read_line(&mut buf) {
-            Ok(0) => break,
-            Ok(_) => {
-                println!("buffer: {}", &buf[0..buf.len() - 1]); // Drop \n.
-                buf.clear();
-            }
-            Err(e) => {
-                println!("err: {}", e);
-                break;
-            }
+        let n = reader.read_line(&mut buf).expect("readline error");
+        if n == 0 {
+            break;
         }
+
+        // by -1 we drop \n.
+        let text = &buf[0..buf.len() - 1];
+        println!("buffer: {text}");
+
+        buf.clear();
     }
 }

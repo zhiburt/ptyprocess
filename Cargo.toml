@@ -13,4 +13,4 @@ keywords = ["pty", "tty", "terminal"]
 categories = ["development-tools", "command-line-interface"]
 
 [dependencies]
-nix = "0.21.0"
+nix = "0.26"
