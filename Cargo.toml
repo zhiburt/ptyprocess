@@ -1,6 +1,6 @@
 [package]
 name = "ptyprocess"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Maxim Zhiburt <zhiburt@gmail.com>"]
 edition = "2018"
 description = "A library to work with PTY/TTY on Unix systems"
@@ -13,4 +13,4 @@ keywords = ["pty", "tty", "terminal"]
 categories = ["development-tools", "command-line-interface"]
 
 [dependencies]
-nix = "0.21.0"
+nix = "0.26"

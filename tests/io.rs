@@ -113,8 +113,6 @@ fn ptyprocess_check_terminal_line_settings() {
     let mut buf = String::new();
     w.read_to_string(&mut buf).unwrap();
 
-    println!("{}", buf);
-
     assert!(buf.split_whitespace().any(|word| word == "-echo"));
 }
 
