@@ -482,7 +482,7 @@ fn get_slave_name(fd: &PtyMaster) -> Result<String> {
 
     if !isptmaster(fd)? {
         // never reached according current implementation of isptmaster
-        return Err(nix::Error::Sys(Errno::EINVAL));
+        return Err(nix::Error::EINVAL);
     }
 
     // todo: Need to determine the correct size via some contstant like SPECNAMELEN in <sys/filio.h>
