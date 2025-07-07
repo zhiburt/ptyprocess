@@ -467,7 +467,7 @@ impl AsRawFd for Master {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn get_slave_name(fd: &PtyMaster) -> Result<String> {
     nix::pty::ptsname_r(fd)
 }
