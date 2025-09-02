@@ -46,9 +46,7 @@ use nix::pty::{grantpt, posix_openpt, unlockpt};
 use nix::sys::stat::Mode;
 use nix::sys::wait::{self, waitpid};
 use nix::sys::{signal, termios};
-use nix::unistd::{
-    self, close, dup, dup2, fork, isatty, pipe, setsid, sysconf, write, ForkResult, Pid, SysconfVar,
-};
+use nix::unistd::{self, close, dup, dup2, fork, isatty, pipe, setsid, write, ForkResult, Pid};
 use nix::{ioctl_write_ptr_bad, Result};
 use signal::Signal::SIGKILL;
 use std::fs::File;
@@ -719,8 +717,12 @@ fn make_controlling_tty(ptm: &Master) -> Result<()> {
 }
 
 // Except is used for cases like double free memory
+#[cfg(not(any(
+    all(feature = "close-range", target_os = "linux"),
+    target_os = "freebsd",
+)))]
 fn close_all_descriptors(except: &[RawFd]) -> Result<()> {
-    // On linux could be used getrlimit(RLIMIT_NOFILE, rlim) interface
+    use nix::unistd::{sysconf, SysconfVar};
     let max_open_fds = sysconf(SysconfVar::OPEN_MAX)?.unwrap() as i32;
     (0..max_open_fds)
         .filter(|fd| !except.contains(fd))
@@ -729,7 +731,42 @@ fn close_all_descriptors(except: &[RawFd]) -> Result<()> {
             // because it will be hard to determine which descriptors closed already.
             let _ = close(fd);
         });
+    Ok(())
+}
 
+// Use `close_range` when possible to close most descriptors in one syscall.
+#[cfg(any(
+    all(feature = "close-range", target_os = "linux"),
+    target_os = "freebsd",
+))]
+fn close_all_descriptors(except: &[RawFd]) -> Result<()> {
+    debug_assert!(!except.is_empty());
+
+    let mut except = except.to_vec();
+    except.sort_unstable();
+
+    // Iterate over all ranges of file descriptors to close.
+    let all_fds = std::iter::empty()
+        .chain(std::iter::once(0..except[0]))
+        .chain(except.windows(2).map(|w| (w[0] + 1)..w[1]))
+        .chain(std::iter::once((except.last().unwrap() + 1)..RawFd::MAX));
+    for range in all_fds {
+        match range.len() {
+            0 => {}
+            1 => _ = close(range.start),
+            _ => {
+                // `range` is exclusive, while `close_range` expects an inclusive range.
+                let first = range.start as std::ffi::c_uint;
+                let last = (range.end as std::ffi::c_uint).saturating_sub(1);
+
+                // `close_range` documents:
+                // > Errors closing a given file descriptor are currently ignored.
+                // This is not a strong enough guarantee for us to handle the error,
+                // so just ignore it to match the behavior of the non-`close_range` implementation.
+                let _ = unsafe { nix::libc::close_range(first, last, 0) };
+            }
+        }
+    }
     Ok(())
 }
 
