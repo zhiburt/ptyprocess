@@ -2,7 +2,7 @@
 //!
 //! It aims to work on all major Unix variants.
 //!
-//! The library was developed as a backend for a https://github.com/zhiburt/expectrl.
+//! The library was developed as a backend for a [https://github.com/zhiburt/expectrl](https://github.com/zhiburt/expectrl).
 //! If you're interested in a high level operations may you'd better take a look at `zhiburt/expectrl`.
 //!
 //! ## Usage
@@ -19,7 +19,7 @@
 //! let mut stream = process.get_raw_handle().expect("failed to create a stream");
 //!
 //! // send a message to process
-//! writeln!(stream, "Hello cat").expect("failed to write to a stream");
+//! writeln!(stream, "Hello World!").expect("failed to write to a stream");
 //!
 //! // read a line from the stream
 //! let mut reader = BufReader::new(stream);
@@ -31,6 +31,10 @@
 //! // stop the process
 //! assert!(process.exit(true).expect("failed to stop the process"))
 //! ```
+//!
+//! ### Features
+//!
+//! - `close-range` - optimization for faster `PtyProcess::spawn` (available on FreeBSD and on Linux since 5.9 and glibc 2.34)
 
 pub mod stream;
 
@@ -305,7 +309,7 @@ impl PtyProcess {
     pub fn is_alive(&self) -> Result<bool> {
         let status = self.status();
         match status {
-            Ok(status) if status == WaitStatus::StillAlive => Ok(true),
+            Ok(WaitStatus::StillAlive) => Ok(true),
             Ok(_) | Err(Error::ECHILD) | Err(Error::ESRCH) => Ok(false),
             Err(err) => Err(err),
         }
