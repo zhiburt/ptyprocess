@@ -10,9 +10,10 @@ If you're interested in a high level operations may you'd better take a look at 
 ## Usage
 
 ```rust
-use ptyprocess::PtyProcess;
 use std::io::{BufRead, BufReader, Result, Write};
 use std::process::Command;
+
+use ptyprocess::PtyProcess;
 
 fn main() -> Result<()> {
     // spawn a cat process
@@ -22,7 +23,7 @@ fn main() -> Result<()> {
     let mut stream = process.get_raw_handle()?;
 
     // send a message to process
-    writeln!(stream, "Hello cat")?;
+    writeln!(stream, "Hello World!")?;
 
     // read a line from the stream
     let mut reader = BufReader::new(stream);
@@ -37,3 +38,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 ```
+
+### Features
+
+- `close-range` - optimization for faster `PtyProcess::spawn` (available on FreeBSD and on Linux since 5.9 and glibc 2.34)
