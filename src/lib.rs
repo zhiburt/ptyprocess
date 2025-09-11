@@ -118,9 +118,9 @@ impl PtyProcess {
 
                     // Do not allow child to inherit open file descriptors from parent
                     close_all_descriptors(&[
-                        0,
-                        1,
-                        2,
+                        STDIN_FILENO,
+                        STDOUT_FILENO,
+                        STDERR_FILENO,
                         slave_fd,
                         exec_err_pipe_w,
                         exec_err_pipe_r,
@@ -717,42 +717,37 @@ fn make_controlling_tty(ptm: &Master) -> Result<()> {
 }
 
 // Except is used for cases like double free memory
-#[cfg(not(any(
-    all(feature = "close-range", target_os = "linux"),
-    target_os = "freebsd",
-)))]
+#[cfg(not(feature = "close-range"))]
 fn close_all_descriptors(except: &[RawFd]) -> Result<()> {
     use nix::unistd::{sysconf, SysconfVar};
+
     let max_open_fds = sysconf(SysconfVar::OPEN_MAX)?.unwrap() as i32;
-    (0..max_open_fds)
-        .filter(|fd| !except.contains(fd))
-        .for_each(|fd| {
-            // We don't handle errors intentionally,
-            // because it will be hard to determine which descriptors closed already.
-            let _ = close(fd);
-        });
+
+    for fd in 0..max_open_fds {
+        if except.contains(&fd) {
+            continue;
+        }
+
+        // We don't handle errors intentionally,
+        // because it will be hard to determine which descriptors closed already.
+        let _ = close(fd);
+    }
+
     Ok(())
 }
 
 // Use `close_range` when possible to close most descriptors in one syscall.
-#[cfg(any(
-    all(feature = "close-range", target_os = "linux"),
-    target_os = "freebsd",
-))]
+#[cfg(feature = "close-range")]
 fn close_all_descriptors(except: &[RawFd]) -> Result<()> {
-    debug_assert!(!except.is_empty());
+    if except.is_empty() {
+        return Ok(());
+    }
 
-    let mut except = except.to_vec();
-    except.sort_unstable();
+    let fds = get_untouched_fds(except);
 
-    // Iterate over all ranges of file descriptors to close.
-    let all_fds = std::iter::empty()
-        .chain(std::iter::once(0..except[0]))
-        .chain(except.windows(2).map(|w| (w[0] + 1)..w[1]))
-        .chain(std::iter::once((except.last().unwrap() + 1)..RawFd::MAX));
-    for range in all_fds {
+    for range in fds {
         match range.len() {
-            0 => {}
+            0 => unreachable!("must never happen"),
             1 => _ = close(range.start),
             _ => {
                 // `range` is exclusive, while `close_range` expects an inclusive range.
@@ -767,7 +762,38 @@ fn close_all_descriptors(except: &[RawFd]) -> Result<()> {
             }
         }
     }
+
     Ok(())
+}
+
+#[cfg(feature = "close-range")]
+fn get_untouched_fds(except: &[RawFd]) -> Vec<std::ops::Range<RawFd>> {
+    if except.is_empty() {
+        return vec![0..RawFd::MAX];
+    }
+
+    let mut except = except.to_vec();
+    except.sort_unstable();
+
+    let mut ranges = vec![];
+
+    if except[0] > 0 {
+        ranges.push(0..except[0]);
+    }
+
+    for range in except.windows(2) {
+        if range[0] + 1 == range[1] {
+            continue;
+        }
+
+        ranges.push(range[0] + 1..range[1]);
+    }
+
+    if except[except.len() - 1] < RawFd::MAX {
+        ranges.push((except[except.len() - 1] + 1)..RawFd::MAX);
+    }
+
+    ranges
 }
 
 #[cfg(test)]
@@ -809,5 +835,29 @@ mod tests {
         assert!(master.fd.as_raw_fd() == old_master_fd);
 
         Ok(())
+    }
+
+    #[cfg(feature = "close-range")]
+    #[test]
+    fn test_get_ranges() {
+        assert_eq!(get_untouched_fds(&[]), vec![0..RawFd::MAX]);
+        assert_eq!(get_untouched_fds(&[RawFd::MAX]), vec![0..RawFd::MAX]);
+        assert_eq!(
+            get_untouched_fds(&[10, RawFd::MAX]),
+            vec![0..10, 11..RawFd::MAX]
+        );
+        assert_eq!(get_untouched_fds(&[100]), vec![0..100, 101..RawFd::MAX]);
+        assert_eq!(
+            get_untouched_fds(&[10, 20]),
+            vec![0..10, 11..20, 21..RawFd::MAX]
+        );
+        assert_eq!(
+            get_untouched_fds(&[1, 2, 10, 20]),
+            vec![0..1, 3..10, 11..20, 21..RawFd::MAX]
+        );
+        assert_eq!(
+            get_untouched_fds(&[0, 1, 2, 10, 20]),
+            vec![3..10, 11..20, 21..RawFd::MAX]
+        );
     }
 }
