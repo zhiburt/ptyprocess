@@ -13,7 +13,9 @@ keywords = ["pty", "tty", "terminal"]
 categories = ["development-tools", "command-line-interface"]
 
 [dependencies]
-nix = "0.26"
+# nix 0.27 flipped to `default = []` (opt-in features), unlike 0.26's broad
+# defaults. Enable exactly the modules ptyprocess uses.
+nix = { version = "0.27", features = ["fs", "term", "signal", "process", "ioctl", "feature"] }
 
 [features]
 # Use `close_range` on supported platforms to improve performance when closing many descriptors.

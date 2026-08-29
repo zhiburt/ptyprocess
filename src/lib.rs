@@ -54,7 +54,7 @@ use nix::unistd::{self, close, dup, dup2, fork, isatty, pipe, setsid, write, For
 use nix::{ioctl_write_ptr_bad, Result};
 use signal::Signal::SIGKILL;
 use std::fs::File;
-use std::os::unix::prelude::{AsRawFd, CommandExt, FromRawFd, RawFd};
+use std::os::unix::prelude::{AsRawFd, BorrowedFd, CommandExt, FromRawFd, RawFd};
 use std::process::{self, Command};
 use std::thread;
 use std::time::{self, Duration};
@@ -247,7 +247,7 @@ impl PtyProcess {
 
     /// The function returns true if an echo setting is setup.
     pub fn get_echo(&self) -> Result<bool> {
-        termios::tcgetattr(self.master.as_raw_fd())
+        termios::tcgetattr(unsafe { BorrowedFd::borrow_raw(self.master.as_raw_fd()) })
             .map(|flags| flags.local_flags.contains(termios::LocalFlags::ECHO))
     }
 
@@ -586,6 +586,7 @@ fn redirect_std_streams(fd: RawFd) -> Result<()> {
 fn set_echo(fd: RawFd, on: bool) -> Result<()> {
     // Set echo off
     // Even though there may be something left behind https://stackoverflow.com/a/59034084
+    let fd = unsafe { BorrowedFd::borrow_raw(fd) };
     let mut flags = termios::tcgetattr(fd)?;
     match on {
         true => flags.local_flags |= termios::LocalFlags::ECHO,
@@ -597,6 +598,7 @@ fn set_echo(fd: RawFd, on: bool) -> Result<()> {
 }
 
 pub fn set_raw(fd: RawFd) -> Result<()> {
+    let fd = unsafe { BorrowedFd::borrow_raw(fd) };
     let mut flags = termios::tcgetattr(fd)?;
 
     #[cfg(not(target_os = "macos"))]
@@ -649,7 +651,7 @@ fn get_eof_char() -> u8 {
 }
 
 fn get_term_char(fd: RawFd, char: SpecialCharacterIndices) -> Result<u8> {
-    let flags = termios::tcgetattr(fd)?;
+    let flags = termios::tcgetattr(unsafe { BorrowedFd::borrow_raw(fd) })?;
     let b = flags.control_chars[char as usize];
     Ok(b)
 }
